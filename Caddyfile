@@ -1,0 +1,11 @@
+# Caddy = a web server that gets HTTPS certificates automatically.
+# {$LORE_DOMAIN} is read from the environment (docker-compose.yml passes it in).
+{$LORE_DOMAIN} {
+	reverse_proxy api:8000 {
+		# SSE (live investigation steps) must not be buffered, or the browser sees nothing
+		# until the whole run is done. -1 means "flush every write immediately".
+		flush_interval -1
+	}
+
+	# Note: we deliberately do NOT use `encode` (gzip). Compression can hold back SSE chunks.
+}

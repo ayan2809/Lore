@@ -1,0 +1,465 @@
+{
+ "note": "HAND-WRITTEN sample, not a recording. Follows Story A (docs/story-bible.md) for viewer arjun so the frontend can be demoed without a backend LLM. Real recordings are written by lore.replay.Recorder to replays/story_a_<persona>.jsonl.",
+ "events": [
+  {
+   "type": "investigation_started",
+   "investigation_id": "inv:sample",
+   "seq": 0,
+   "ts": 0.0,
+   "agent": null,
+   "payload": {
+    "alert_id": "A-3001",
+    "viewer_id": "person:arjun",
+    "mode": "graph",
+    "replay": true
+   }
+  },
+  {
+   "type": "agent_started",
+   "investigation_id": "inv:sample",
+   "seq": 1,
+   "ts": 0.6,
+   "agent": "triage",
+   "payload": {
+    "agent": "triage",
+    "goal": "What is broken and how bad is it?"
+   }
+  },
+  {
+   "type": "tool_call",
+   "investigation_id": "inv:sample",
+   "seq": 2,
+   "ts": 1.2,
+   "agent": "triage",
+   "payload": {
+    "tool": "find_entity",
+    "reason": "Find the service the alert fired on.",
+    "args": {
+     "name": "alert:A-3001"
+    }
+   }
+  },
+  {
+   "type": "tool_result",
+   "investigation_id": "inv:sample",
+   "seq": 3,
+   "ts": 1.8,
+   "agent": "triage",
+   "payload": {
+    "tool": "find_entity",
+    "reason": "Find the service the alert fired on.",
+    "cypher": "MATCH (a:Alert {id:$id})-[:FIRED_ON]->(s:Service) RETURN a, s",
+    "ms": 4.1,
+    "node_ids": [
+     "alert:A-3001",
+     "svc:checkout"
+    ],
+    "edges": [
+     {
+      "source": "alert:A-3001",
+      "target": "svc:checkout",
+      "type": "FIRED_ON"
+     }
+    ],
+    "restricted_matches": 0,
+    "row_count": 1,
+    "error": null
+   }
+  },
+  {
+   "type": "tool_call",
+   "investigation_id": "inv:sample",
+   "seq": 4,
+   "ts": 2.4,
+   "agent": "triage",
+   "payload": {
+    "tool": "blast_radius",
+    "reason": "See what else depends on checkout.",
+    "args": {
+     "service": "svc:checkout"
+    }
+   }
+  },
+  {
+   "type": "tool_result",
+   "investigation_id": "inv:sample",
+   "seq": 5,
+   "ts": 3.0,
+   "agent": "triage",
+   "payload": {
+    "tool": "blast_radius",
+    "reason": "See what else depends on checkout.",
+    "cypher": "MATCH (s:Service {id:$service})-[:DEPENDS_ON*1..3]->(d:Service) RETURN d.id, d.tier",
+    "ms": 6.8,
+    "node_ids": [
+     "svc:checkout",
+     "svc:promo-engine",
+     "svc:pricing",
+     "svc:orders"
+    ],
+    "edges": [
+     {
+      "source": "svc:checkout",
+      "target": "svc:promo-engine",
+      "type": "DEPENDS_ON"
+     },
+     {
+      "source": "svc:promo-engine",
+      "target": "svc:pricing",
+      "type": "DEPENDS_ON"
+     },
+     {
+      "source": "svc:checkout",
+      "target": "svc:orders",
+      "type": "DEPENDS_ON"
+     }
+    ],
+    "restricted_matches": 0,
+    "row_count": 3,
+    "error": null
+   }
+  },
+  {
+   "type": "agent_finished",
+   "investigation_id": "inv:sample",
+   "seq": 6,
+   "ts": 3.6,
+   "agent": "triage",
+   "payload": {
+    "agent": "triage",
+    "confidence": 0.9,
+    "findings": 1
+   }
+  },
+  {
+   "type": "agent_started",
+   "investigation_id": "inv:sample",
+   "seq": 7,
+   "ts": 4.2,
+   "agent": "historian",
+   "payload": {
+    "agent": "historian",
+    "goal": "Have we seen this before?"
+   }
+  },
+  {
+   "type": "tool_call",
+   "investigation_id": "inv:sample",
+   "seq": 8,
+   "ts": 4.8,
+   "agent": "historian",
+   "payload": {
+    "tool": "search_discussions",
+    "reason": "Look for past talk about pricing cache TTL.",
+    "args": {
+     "query": "pricing cache TTL"
+    }
+   }
+  },
+  {
+   "type": "tool_result",
+   "investigation_id": "inv:sample",
+   "seq": 9,
+   "ts": 5.4,
+   "agent": "historian",
+   "payload": {
+    "tool": "search_discussions",
+    "reason": "Look for past talk about pricing cache TTL.",
+    "cypher": "CALL db.idx.vector.queryNodes('Chunk','embedding',5,$qvec) ... WHERE src.access_level IN $open_levels OR ...",
+    "ms": 21.5,
+    "node_ids": [
+     "adr:011",
+     "inc:INC-0307"
+    ],
+    "edges": [
+     {
+      "source": "adr:011",
+      "target": "inc:INC-0307",
+      "type": "RECORDED_IN"
+     }
+    ],
+    "restricted_matches": 1,
+    "row_count": 2,
+    "error": null
+   }
+  },
+  {
+   "type": "agent_finished",
+   "investigation_id": "inv:sample",
+   "seq": 10,
+   "ts": 6.0,
+   "agent": "historian",
+   "payload": {
+    "agent": "historian",
+    "confidence": 0.8,
+    "findings": 1
+   }
+  },
+  {
+   "type": "agent_started",
+   "investigation_id": "inv:sample",
+   "seq": 11,
+   "ts": 6.6,
+   "agent": "investigator",
+   "payload": {
+    "agent": "investigator",
+    "goal": "What changed, and why does it matter?"
+   }
+  },
+  {
+   "type": "tool_call",
+   "investigation_id": "inv:sample",
+   "seq": 12,
+   "ts": 7.2,
+   "agent": "investigator",
+   "payload": {
+    "tool": "evidence_path",
+    "reason": "Connect the alert to a recent change.",
+    "args": {
+     "alert_id": "alert:A-3001",
+     "pr_number": 482
+    }
+   }
+  },
+  {
+   "type": "tool_result",
+   "investigation_id": "inv:sample",
+   "seq": 13,
+   "ts": 7.8,
+   "agent": "investigator",
+   "payload": {
+    "tool": "evidence_path",
+    "reason": "Connect the alert to a recent change.",
+    "cypher": "MATCH p = algo.SPpaths({sourceNode: a, targetNode: pr, relTypes:['FIRED_ON','DEPENDS_ON','DEPLOYED_TO','INCLUDES']}) ...",
+    "ms": 9.3,
+    "node_ids": [
+     "alert:A-3001",
+     "svc:checkout",
+     "svc:promo-engine",
+     "svc:pricing",
+     "deploy:991",
+     "pr:482"
+    ],
+    "edges": [
+     {
+      "source": "alert:A-3001",
+      "target": "svc:checkout",
+      "type": "FIRED_ON"
+     },
+     {
+      "source": "svc:checkout",
+      "target": "svc:promo-engine",
+      "type": "DEPENDS_ON"
+     },
+     {
+      "source": "svc:promo-engine",
+      "target": "svc:pricing",
+      "type": "DEPENDS_ON"
+     },
+     {
+      "source": "deploy:991",
+      "target": "svc:pricing",
+      "type": "DEPLOYED_TO"
+     },
+     {
+      "source": "deploy:991",
+      "target": "pr:482",
+      "type": "INCLUDES"
+     }
+    ],
+    "restricted_matches": 0,
+    "row_count": 1,
+    "error": null
+   }
+  },
+  {
+   "type": "finding",
+   "investigation_id": "inv:sample",
+   "seq": 14,
+   "ts": 8.4,
+   "agent": "investigator",
+   "payload": {
+    "text": "PR #482 lowered the pricing cache TTL from 300s to 5s, and deploy 991 shipped it to pricing 90 minutes before the alert.",
+    "citations": [
+     "pr:482",
+     "deploy:991"
+    ],
+    "confidence": 0.86
+   }
+  },
+  {
+   "type": "agent_finished",
+   "investigation_id": "inv:sample",
+   "seq": 15,
+   "ts": 9.0,
+   "agent": "investigator",
+   "payload": {
+    "agent": "investigator",
+    "confidence": 0.86,
+    "findings": 1
+   }
+  },
+  {
+   "type": "agent_started",
+   "investigation_id": "inv:sample",
+   "seq": 16,
+   "ts": 9.6,
+   "agent": "responder",
+   "payload": {
+    "agent": "responder",
+    "goal": "Who should we call and what should we do?"
+   }
+  },
+  {
+   "type": "tool_call",
+   "investigation_id": "inv:sample",
+   "seq": 17,
+   "ts": 10.2,
+   "agent": "responder",
+   "payload": {
+    "tool": "who_knows",
+    "reason": "Find the owner, expert and author for pricing.",
+    "args": {
+     "service": "svc:pricing"
+    }
+   }
+  },
+  {
+   "type": "tool_result",
+   "investigation_id": "inv:sample",
+   "seq": 18,
+   "ts": 10.8,
+   "agent": "responder",
+   "payload": {
+    "tool": "who_knows",
+    "reason": "Find the owner, expert and author for pricing.",
+    "cypher": "MATCH (t:Team)-[:OWNS]->(s:Service {id:$service}) ...",
+    "ms": 5.2,
+    "node_ids": [
+     "person:rahul",
+     "person:marco",
+     "person:priya"
+    ],
+    "edges": [],
+    "restricted_matches": 0,
+    "row_count": 3,
+    "error": null
+   }
+  },
+  {
+   "type": "report",
+   "investigation_id": "inv:sample",
+   "seq": 19,
+   "ts": 11.4,
+   "agent": "responder",
+   "payload": {
+    "summary": "Checkout latency is caused by PR #482, which cut the pricing cache TTL to 5s.",
+    "root_cause": "pr:482",
+    "rejected_suspects": [
+     {
+      "text": "PR #479 only changed checkout button copy, so it is not the cause.",
+      "citations": [
+       "pr:479"
+      ]
+     }
+    ],
+    "severity": "P1",
+    "claims": [
+     {
+      "text": "PR #482 changed the pricing cache TTL from 300s to 5s.",
+      "citations": [
+       "pr:482"
+      ]
+     },
+     {
+      "text": "ADR-011 says the pricing cache TTL must stay at 300s or more.",
+      "citations": [
+       "adr:011"
+      ]
+     },
+     {
+      "text": "The same mistake caused INC-0307 in March.",
+      "citations": [
+       "inc:INC-0307"
+      ]
+     }
+    ],
+    "evidence_path": [
+     "alert:A-3001",
+     "svc:checkout",
+     "svc:promo-engine",
+     "svc:pricing",
+     "deploy:991",
+     "pr:482"
+    ],
+    "people": {
+     "page": "person:rahul",
+     "consult": [
+      "person:marco"
+     ],
+     "notify": [
+      "person:priya"
+     ]
+    },
+    "confidence": 0.86,
+    "restricted_matches": 1,
+    "restricted_owner_hint": "1 restricted source matched. Ask the Pricing team (Rahul) for access.",
+    "dropped_claims": []
+   }
+  },
+  {
+   "type": "action_proposed",
+   "investigation_id": "inv:sample",
+   "seq": 20,
+   "ts": 12.0,
+   "agent": "responder",
+   "payload": {
+    "id": "action:sample",
+    "investigation_id": "inv:sample",
+    "kind": "slack_post",
+    "target": "#incidents",
+    "title": null,
+    "text": "P1: checkout p99 latency. Likely cause: PR #482 (pricing cache TTL 300s -> 5s), deployed in deploy 991. Page Rahul, consult Marco, notify Priya.",
+    "cited_ids": [
+     "pr:482",
+     "deploy:991",
+     "adr:011"
+    ],
+    "status": "proposed",
+    "blocked_reason": null,
+    "result_url": null,
+    "simulated": false
+   }
+  },
+  {
+   "type": "agent_finished",
+   "investigation_id": "inv:sample",
+   "seq": 21,
+   "ts": 12.6,
+   "agent": "responder",
+   "payload": {
+    "agent": "responder",
+    "confidence": 0.86,
+    "findings": 2
+   }
+  },
+  {
+   "type": "done",
+   "investigation_id": "inv:sample",
+   "seq": 22,
+   "ts": 13.2,
+   "agent": null,
+   "payload": {
+    "investigation_id": "inv:sample",
+    "steps": 5,
+    "model_calls": 9,
+    "tokens_in": 14200,
+    "tokens_out": 2100,
+    "cost_usd": 0.054,
+    "total_ms": 11400.0,
+    "time_to_root_cause_ms": 7300.0,
+    "replay": true
+   }
+  }
+ ]
+}

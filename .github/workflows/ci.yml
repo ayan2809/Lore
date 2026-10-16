@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (lint + fast tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Tests (no FalkorDB, no Gemini)
+        run: uv run pytest -m "not integration and not live_llm"
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  integration:
+    name: Integration (FalkorDB, fake embeddings)
+    runs-on: ubuntu-latest
+    # TODO: remove continue-on-error once this job has passed on GitHub at least once.
+    # Until then a failure here does not turn the whole CI red.
+    continue-on-error: true
+    needs: backend
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      falkordb:
+        image: falkordb/falkordb:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LORE_FALKORDB_HOST: localhost
+      LORE_FALKORDB_PORT: "6379"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Load the Kettle graph (fake embeddings, no Gemini key needed)
+        run: uv run python -m lore.loader.load --reset --fake-embeddings
+      - name: Integration tests
+        run: uv run pytest -m integration

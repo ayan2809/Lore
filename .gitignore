@@ -30,3 +30,6 @@ backend/eval/report.md
 backend/replays/*.jsonl
 !backend/replays/.gitkeep
 logs/
+
+# FalkorDBLite data (make db-lite)
+.falkordb-lite/
