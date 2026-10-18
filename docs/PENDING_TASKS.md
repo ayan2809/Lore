@@ -40,7 +40,7 @@
 | T-38 | P0 | **Public-URL protection** (R-31 item 3) | agent | ✅ Done Oct 18: daily cap of 100 live runs (then replay) + 1,000 Asks (then 429) |
 | T-39 | P1 | Integration tests write memory (playbooks, investigations) into the real graph: point them at their own graph (e.g. `org_kettle_test`, loaded with fake embeddings) | agent | FIX_LOG F-14 |
 | T-40 | P1 | UI: a way to drop citations on a blocked action (the API supports `cited_ids` on PATCH) | agent | FIX_LOG F-09 |
-| T-41 | P1 | UI: when the report arrives, zoom the graph to the evidence path (the end-of-run view is cramped) | agent | HUMAN_REVIEW R-14 |
+| T-41 | P1 | UI: when the report arrives, zoom the graph to the evidence path (the end-of-run view is cramped) | agent | HUMAN_REVIEW R-14. ✅ Done Oct 18 with the graph-motion fix (FIX_LOG F-18) |
 | T-42 | P1 | Update README Quickstart/Q6 and `frontend/README.md` for AWS (they still mention Vercel/VM); Ayan is editing README | Ayan + agent | |
 | T-43 | P2 | Sam's "100 restricted sources" wording | agent | HUMAN_REVIEW R-33 |
 

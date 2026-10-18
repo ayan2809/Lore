@@ -144,7 +144,7 @@ make aws-backend                       # zip backend/ -> S3 -> CodeBuild (ARM64)
 make aws-frontend                      # npm ci + build (VITE_API_BASE empty) -> S3 -> invalidate /index.html
 ```
 
-A backend deploy replaces the single task, so the API is down for about a minute. The graph stays on EFS. To try another Gemini model without code changes: `MODEL_PRO=gemini-4-argon infra/deploy.sh backend-only` (also `MODEL_FLASH`, `MODEL_EMBED`, `GITHUB_REPO`, `RATE_LIMIT_PER_MINUTE`; the stack remembers them until you override them again).
+A backend deploy replaces the single task, so the API is down for about 2 minutes (measured on 2026-10-18: old task stopped 15:24:05, new one in the load balancer 15:26:01). During that window the page still loads from S3, but its `/api` calls fail, so the page looks broken. Don't deploy just before a demo. The graph stays on EFS. To try another Gemini model without code changes: `MODEL_PRO=gemini-4-argon infra/deploy.sh backend-only` (also `MODEL_FLASH`, `MODEL_EMBED`, `GITHUB_REPO`, `RATE_LIMIT_PER_MINUTE`; the stack remembers them until you override them again).
 
 ### 8.5 Restart and rollback
 

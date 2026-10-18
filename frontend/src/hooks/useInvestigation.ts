@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { api } from '../api/client'
 import type { Action, GraphMode } from '../api/types'
-import { computeHighlights, discoveredFromTrail, initialState, reduce } from './investigationState'
+import { computeHighlights, discoveredFromTrail, initialState, reduce, withEvidencePath } from './investigationState'
 
 export function useInvestigation() {
   const [state, dispatch] = useReducer(reduce, initialState)
@@ -67,7 +67,12 @@ export function useInvestigation() {
   const updateAction = useCallback((action: Action) => dispatch({ t: 'action', action }), [])
 
   // Derived data for the graph canvas
-  const highlights = useMemo(() => computeHighlights(state.trail, state.selectedSeq), [state.trail, state.selectedSeq])
+  // While following the run the latest step is lit; after the report, the evidence path is
+  // (unless the user clicked a step to look at it).
+  const highlights = useMemo(() => {
+    const h = computeHighlights(state.trail, state.selectedSeq)
+    return state.report && state.selectedSeq === null ? withEvidencePath(h, state.report.evidence_path) : h
+  }, [state.trail, state.selectedSeq, state.report])
   const discovered = useMemo(() => discoveredFromTrail(state.trail), [state.trail])
 
   return { state, highlights, discovered, start, clear, selectStep, updateAction }

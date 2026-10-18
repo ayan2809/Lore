@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 980" width="1440" height="980" role="img" aria-labelledby="title desc">
+  <title id="title">Lore architecture</title>
+  <desc id="desc">A browser reaches CloudFront, which serves the React page from S3 and sends /api to FastAPI in an ECS Fargate task. FastAPI runs a supervisor and four agents, which call Gemini and use read-only Cypher tools against FalkorDB. Slack and GitHub get a post and an issue only after a human approves. A loader fills FalkorDB on start. The same tools are exposed to Gemini CLI through a local MCP server.</desc>
+  <defs>
+    <marker id="head" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#64748b"/></marker>
+    <marker id="head-blue" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#38bdf8"/></marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .h { font-size: 15px; font-weight: 700; fill: #f1f5f9; }
+    .t { font-size: 13px; fill: #94a3b8; }
+    .lbl { font-size: 13px; fill: #64748b; }
+    .card { fill: #0f172a; stroke: #334155; }
+    .ext { fill: #020617; stroke: #475569; }
+    .local { fill: #020617; stroke: #475569; stroke-dasharray: 5 4; }
+    .arrow { stroke: #64748b; stroke-width: 2; fill: none; stroke-linecap: round; }
+  </style>
+
+  <rect width="1440" height="980" fill="#020617"/>
+
+  <!-- title -->
+  <text x="64" y="88" style="font-size: 32px; font-weight: 700; fill: #ffffff; letter-spacing: -0.5px">Lore architecture</text>
+  <text x="64" y="116" class="t" style="font-size: 15px">One FalkorDB graph holds the company, who may see what, and the agents' memory.</text>
+  <text x="64" y="138" class="t" style="font-size: 15px">Permissions are applied inside every Cypher query.</text>
+
+  <!-- AWS task band -->
+  <rect x="588.5" y="128.5" width="541" height="703" rx="16" fill="rgba(15,23,42,0.45)" stroke="#1e293b"/>
+  <text x="604" y="150" style="font-size: 12px; font-weight: 600; fill: #64748b; letter-spacing: 0.7px">AWS · ECS FARGATE TASK (ARM64) · AP-SOUTH-1</text>
+
+  <!-- arrows -->
+  <path class="arrow" d="M264 220 H337" marker-end="url(#head)"/>
+  <path class="arrow" d="M542 220 H615" marker-end="url(#head)"/>
+  <path class="arrow" d="M442 272 V339" marker-end="url(#head)"/>
+  <path class="arrow" d="M820 220 H1171" marker-end="url(#head)"/>
+  <path class="arrow" d="M720 272 V339" marker-end="url(#head)"/>
+  <path class="arrow" d="M820 396 H1171" marker-end="url(#head)"/>
+  <path class="arrow" d="M720 448 V515" marker-end="url(#head)"/>
+  <path class="arrow" d="M820 572 H893" style="stroke: #38bdf8" marker-end="url(#head-blue)"/>
+  <path class="arrow" d="M820 748 H893" marker-end="url(#head)"/>
+  <path class="arrow" d="M264 572 H337" marker-end="url(#head)"/>
+  <path class="arrow" d="M542 572 H615" style="stroke-dasharray: 6 6" marker-end="url(#head)"/>
+
+  <!-- arrow labels -->
+  <text x="303" y="204" class="lbl" text-anchor="middle">HTTPS</text>
+  <text x="581" y="204" class="lbl" text-anchor="middle">/api</text>
+  <text x="454" y="312" class="lbl">page</text>
+  <text x="998" y="204" class="lbl" text-anchor="middle">approved</text>
+  <text x="732" y="312" class="lbl">runs</text>
+  <text x="998" y="380" class="lbl" text-anchor="middle">tool choice, text</text>
+  <text x="732" y="488" class="lbl">tool calls</text>
+  <text x="859" y="556" class="lbl" text-anchor="middle" style="fill: #7dd3fc">Cypher</text>
+  <text x="859" y="732" class="lbl" text-anchor="middle">MERGE</text>
+  <text x="303" y="556" class="lbl" text-anchor="middle">stdio</text>
+
+  <!-- Browser -->
+  <rect x="64.5" y="168.5" width="199" height="103" rx="10" class="card"/>
+  <text x="76" y="198" class="h">Browser</text>
+  <text x="76" y="216" class="t">React: live graph, trail,</text>
+  <text x="76" y="234" class="t">report, persona switch;</text>
+  <text x="76" y="252" class="t">steps stream over SSE</text>
+
+  <!-- CloudFront -->
+  <rect x="342.5" y="168.5" width="199" height="103" rx="10" class="card"/>
+  <text x="354" y="198" class="h">CloudFront</text>
+  <text x="354" y="216" class="t">HTTPS; sends /api to the</text>
+  <text x="354" y="234" class="t">load balancer with a</text>
+  <text x="354" y="252" class="t">secret origin header</text>
+
+  <!-- S3 -->
+  <rect x="342.5" y="344.5" width="199" height="103" rx="10" class="card"/>
+  <text x="354" y="374" class="h">S3</text>
+  <text x="354" y="392" class="t">the built React page,</text>
+  <text x="354" y="410" class="t">private, read by</text>
+  <text x="354" y="428" class="t">CloudFront only</text>
+
+  <!-- FastAPI -->
+  <rect x="620.5" y="168.5" width="199" height="103" rx="10" class="card"/>
+  <text x="632" y="198" class="h">FastAPI</text>
+  <text x="632" y="216" class="t">session cookie = viewer</text>
+  <text x="632" y="234" class="t">SSE, daily live-run cap</text>
+  <text x="632" y="252" class="t">approve + policy check</text>
+
+  <!-- Agents -->
+  <rect x="620.5" y="344.5" width="199" height="103" rx="10" class="card"/>
+  <text x="632" y="374" class="h">Supervisor + 4 agents</text>
+  <text x="632" y="392" class="t">Triage, Historian,</text>
+  <text x="632" y="410" class="t">Investigator, Responder;</text>
+  <text x="632" y="428" class="t">people picked by rule</text>
+
+  <!-- Tools -->
+  <rect x="620.5" y="520.5" width="199" height="103" rx="10" class="card"/>
+  <text x="632" y="550" class="h">Read-only tools</text>
+  <text x="632" y="568" class="t">Cypher with $viewer;</text>
+  <text x="632" y="586" class="t">each returns node ids,</text>
+  <text x="632" y="604" class="t">the query and its ms</text>
+
+  <!-- Loader -->
+  <rect x="620.5" y="696.5" width="199" height="103" rx="10" class="card"/>
+  <text x="632" y="726" class="h">Loader (on start)</text>
+  <text x="632" y="744" class="t">Kettle data as JSON,</text>
+  <text x="632" y="762" class="t">MERGE into the graph,</text>
+  <text x="632" y="780" class="t">embeddings + access tags</text>
+
+  <!-- FalkorDB -->
+  <rect x="898.5" y="520.5" width="199" height="279" rx="10" fill="rgba(14,165,233,0.08)" stroke="#38bdf8"/>
+  <text x="914" y="596" style="font-size: 17px; font-weight: 700; fill: #ffffff">FalkorDB 4.18</text>
+  <text x="914" y="620" class="t" style="fill: #bae6fd">graph org_kettle:</text>
+  <text x="914" y="640" class="t" style="fill: #bae6fd">people, services, PRs,</text>
+  <text x="914" y="660" class="t" style="fill: #bae6fd">deploys, threads, ADRs,</text>
+  <text x="914" y="680" class="t" style="fill: #bae6fd">incidents, access paths,</text>
+  <text x="914" y="700" class="t" style="fill: #bae6fd">playbooks the agents</text>
+  <text x="914" y="720" class="t" style="fill: #bae6fd">learned; vector and text</text>
+  <text x="914" y="740" class="t" style="fill: #bae6fd">indexes. AOF on EFS.</text>
+
+  <!-- Slack / GitHub -->
+  <rect x="1176.5" y="168.5" width="199" height="103" rx="10" class="ext"/>
+  <text x="1188" y="198" class="h">Slack · GitHub</text>
+  <text x="1188" y="216" class="t">a post and an issue,</text>
+  <text x="1188" y="234" class="t">sent only after a human</text>
+  <text x="1188" y="252" class="t">edits and approves them</text>
+
+  <!-- Gemini API -->
+  <rect x="1176.5" y="344.5" width="199" height="103" rx="10" class="ext"/>
+  <text x="1188" y="374" class="h">Gemini API</text>
+  <text x="1188" y="392" class="t">3.8-flash: reasoning</text>
+  <text x="1188" y="410" class="t">3.5-flash-lite: light work</text>
+  <text x="1188" y="428" class="t">embedding-2: 768-d</text>
+
+  <!-- Gemini CLI -->
+  <rect x="64.5" y="520.5" width="199" height="103" rx="10" class="local"/>
+  <text x="76" y="559" class="h">Gemini CLI</text>
+  <text x="76" y="577" class="t">ask the company brain</text>
+  <text x="76" y="595" class="t">from a terminal</text>
+
+  <!-- MCP server -->
+  <rect x="342.5" y="520.5" width="199" height="103" rx="10" class="local"/>
+  <text x="354" y="550" class="h">MCP server</text>
+  <text x="354" y="568" class="t">the same tools and the</text>
+  <text x="354" y="586" class="t">same permission filter,</text>
+  <text x="354" y="604" class="t">run on a laptop</text>
+
+  <!-- key -->
+  <text x="64" y="888" class="lbl">Solid box: deployed on AWS. Dark box: an outside service. Dashed box: runs on a laptop.</text>
+  <text x="64" y="908" class="lbl">The model picks tools and writes text; code computes the facts, checks every citation and decides who to page.</text>
+</svg>

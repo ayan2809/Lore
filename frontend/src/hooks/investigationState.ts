@@ -241,6 +241,7 @@ export interface Highlights {
   seenNodes: Set<string> // touched earlier in the run: dim highlight
   seenEdges: Set<string>
   activeSeq: number | null
+  focus: string | null // what the camera frames: "step:<seq>", "path", or null (nothing lit)
 }
 
 /** Order-independent key for an edge, so "a->b" and "b->a" match. */
@@ -256,6 +257,7 @@ export function computeHighlights(trail: TrailItem[], selectedSeq: number | null
     seenNodes: new Set(),
     seenEdges: new Set(),
     activeSeq: active?.seq ?? null,
+    focus: active ? `step:${active.seq}` : null,
   }
   for (const t of tools) {
     const isActive = t === active
@@ -263,6 +265,17 @@ export function computeHighlights(trail: TrailItem[], selectedSeq: number | null
     for (const e of t.edges) (isActive ? h.activeEdges : h.seenEdges).add(pairKey(e.source, e.target))
   }
   return h
+}
+
+/** Once the report is in: light the evidence path (alert -> ... -> PR) and dim everything else
+ *  the run touched, so the run ends on the whole story. */
+export function withEvidencePath(h: Highlights, path: string[]): Highlights {
+  if (path.length === 0) return h
+  const activeNodes = new Set(path)
+  const activeEdges = new Set(path.slice(1).map((id, i) => pairKey(path[i], id)))
+  const seenNodes = new Set([...h.seenNodes, ...h.activeNodes].filter((id) => !activeNodes.has(id)))
+  const seenEdges = new Set([...h.seenEdges, ...h.activeEdges].filter((k) => !activeEdges.has(k)))
+  return { activeNodes, activeEdges, seenNodes, seenEdges, activeSeq: null, focus: 'path' }
 }
 
 /** Every node id and edge any tool touched. The canvas adds the ones the graph view lacks. */

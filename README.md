@@ -41,6 +41,11 @@ What it does in the demo (details in [docs/plan.md](docs/plan.md) section 2):
 
 ### Architecture
 
+![Lore architecture: browser, CloudFront and S3, FastAPI with a supervisor and four agents, read-only Cypher tools, FalkorDB, Gemini, Slack and GitHub behind human approval, and a local MCP server for Gemini CLI](docs/architecture.svg)
+
+<details>
+<summary>Text version</summary>
+
 ```
  Fake company data ("Kettle", a food-delivery startup)
  GitHub PRs · deploys · Slack (public + private channels) · Jira · ADRs · incidents
@@ -60,6 +65,8 @@ What it does in the demo (details in [docs/plan.md](docs/plan.md) section 2):
 
  Eval harness: 50+ golden questions · leak tests · Graph ON vs OFF · latency and cost logs
 ```
+
+</details>
 
 Three rules carry the design:
 
