@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # True when the site is served over HTTPS (the cookie then gets the Secure flag). Off by
     # default so http://localhost works. On AWS (CloudFront) it is true.
     cookie_secure: bool = False
+    # Public address of the web page, for links in Slack/GitHub ("Open Lore"). If unset, the API
+    # derives it from the request (the browser's Origin, or CloudFront's host and protocol).
+    public_url: str | None = None
     # "if_empty": at startup, if the graph has no :Service nodes, load backend/data in a background
     # thread (used on AWS, where the graph starts empty on a new EFS volume). "never": do nothing.
     load_on_start: Literal["never", "if_empty"] = "never"

@@ -339,18 +339,64 @@ def edit_action(
     return _action_errors(lambda: actions.edit(action_id, body.text, body.cited_ids))
 
 
+def _public_url(request: Request, settings: Settings) -> str | None:
+    """Where people open Lore: the setting, else the browser's Origin, else CloudFront's host."""
+    if settings.public_url:
+        return settings.public_url.rstrip("/")
+    if request.headers.get("origin"):
+        return request.headers["origin"].rstrip("/")
+    host = request.headers.get("host")
+    proto = request.headers.get("cloudfront-forwarded-proto") or request.url.scheme
+    return f"{proto}://{host}" if host else None
+
+
+async def _render_action(action: Action, run, graph: GraphLike | None, lore_url: str | None):
+    """Readable Slack blocks / GitHub issue text from the run's report (HUMAN_REVIEW R-36).
+    Returns None, so the raw text is sent, if there is no report yet or anything goes wrong:
+    formatting must never block an approved action."""
+    from lore import slack_format as fmt
+
+    report = getattr(run, "report", None)
+    if report is None or graph is None or action.kind not in ("slack_post", "github_issue"):
+        return None
+    try:
+        ids = [run.alert_id, *action.cited_ids, *report.evidence_path,
+               report.root_cause or "", report.people.page or "", *report.people.consult,
+               *report.people.notify, *[i for c in report.claims + report.rejected_suspects
+                                       for i in c.citations], *fmt._ID.findall(action.text)]
+        alert_id = run.alert_id if ":" in run.alert_id else f"alert:{run.alert_id}"
+        ids.append(alert_id)
+        names = await asyncio.to_thread(fmt.lookup_names, graph, [i for i in ids if i])
+        if action.kind == "slack_post":
+            issue_url = next((a.result_url for a in run.actions()
+                              if a.kind == "github_issue" and a.result_url), None)
+            return fmt.build_message(report, alert_id, action.text, names,
+                                     lore_url=lore_url, issue_url=issue_url)
+        body = fmt.humanize(action.text, names)
+        if lore_url:
+            body += f"\n\n---\nDrafted by [Lore]({lore_url}) and approved by a human."
+        title = fmt.humanize(action.title or action.text.splitlines()[0][:80], names)
+        return {"title": title, "body": body}
+    except Exception as exc:
+        log_event(event="render_action_failed", action_id=action.id, error=str(exc))
+        return None
+
+
 @router.post("/actions/{action_id}/approve")
 async def approve_action(
+    request: Request,
     action_id: str,
     viewer: Viewer = Depends(current_viewer),
     settings: Settings = Depends(get_settings),
     graph: GraphLike | None = Depends(deps.get_graph),
     registry: RunRegistry = Depends(runs.get_registry),
 ) -> Action:
-    _own_action(registry, action_id, viewer)
+    action = _own_action(registry, action_id, viewer)
+    rendered = await _render_action(action, registry.get(action.investigation_id), graph,
+                                    _public_url(request, settings))
     try:
         # graph may be None: the policy check then fails closed and the post is blocked
-        return await actions.approve(action_id, graph, settings)
+        return await actions.approve(action_id, graph, settings, rendered)
     except actions.ActionNotFound:
         raise HTTPException(404, "action not found") from None
     except actions.ActionStateError as exc:

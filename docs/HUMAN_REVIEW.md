@@ -10,11 +10,11 @@
 
 The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304 unit tests), and local live testing passed ([FIX_LOG.md](FIX_LOG.md)). **The agent stopped before deploying because these need you:**
 
-1. ~~R-31 public-URL protection~~ **built** (daily cap). Still yours: raise the budget, Gemini spend alert, and pick the secrets command (C10).
+1. ~~R-31 public-URL protection~~ **built** (daily cap); secrets from `.env` approved. Still yours: raise the budget, Gemini spend alert.
 2. ~~R-34~~ keep `gemini-3.8-flash` (decided).
 3. ~~R-32~~ key rotated (done).
-4. **R-36:** the Slack message format (proposal below).
-5. Then run the deploy yourself (R-12 has the exact commands), or tell an agent "deploy".
+4. ~~R-36~~ structured Slack message **built**.
+5. Deploy: **approved by Ayan on Oct 18** (secrets from `.env`).
 
 ## A. Do now (blocking deploy or demo)
 
@@ -66,7 +66,7 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
      - (c) no extra protection: rely on the per-IP rate limit and the alerts.
   4. **Optional infra saving:** shrink the task from 1 vCPU / 2 GB to 0.5 vCPU / 1 GB (ARM). It saves about $0.55/day (~$16 per 30 days); the small graph fits, but investigations may feel slower. Keep 1 vCPU / 2 GB unless the budget is tight.
   5. **Which secrets command (C10)?** Both are built: `make aws-secrets-from-env` (copies the Gemini key, Slack webhook and GitHub token from your local `.env`, never printing them) or `make aws-secrets` (hidden prompts). Pick one; nothing else depends on it.
-  > **Answer:** (Ayan, Oct 18) Item 3: option (a), a global daily cap. **Built:** 100 live investigations per UTC day, then the recorded run, with a note in the trail; plus 1,000 Ask questions per day, then 429 (`LORE_LIVE_RUNS_PER_DAY`, `LORE_LIVE_ASKS_PER_DAY`, CloudFormation `LiveRunsPerDay`/`LiveAsksPerDay`). Item 4: keep 1 vCPU / 2 GB. **Still yours:** item 1 (raise the $12 AWS budget), item 2 (Gemini spend alert), item 5 (which secrets command).
+  > **Answer:** (Ayan, Oct 18) Item 3: option (a), a global daily cap. **Built:** 100 live investigations per UTC day, then the recorded run, with a note in the trail; plus 1,000 Ask questions per day, then 429 (`LORE_LIVE_RUNS_PER_DAY`, `LORE_LIVE_ASKS_PER_DAY`, CloudFormation `LiveRunsPerDay`/`LiveAsksPerDay`). Item 4: keep 1 vCPU / 2 GB. Item 5: `make aws-secrets-from-env` (secrets copied from `.env`), and an agent may deploy. **Still yours:** item 1 (raise the $12 AWS budget), item 2 (Gemini spend alert).
 
 
 - [x] **R-32 · Rotate the Gemini API key.** During testing, a malformed `.env` line made bash print part of the key into this session's tool output (FIX_LOG F-01). It never went into git or any file in the repo. Create a new key in AI Studio, put it in `.env`, delete the old one, and use the new one for the AWS secret.
@@ -84,7 +84,7 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
   > **Answer:**
 
 
-- [ ] **R-36 · The Slack message is informative but badly presented** (Ayan, Oct 18). Today the model writes free text with raw graph ids (`pr:482`, `person:rahul`), with no structure, no links and no @mentions. Proposed fix (needs your OK):
+- [x] **R-36 · The Slack message is informative but badly presented** (Ayan, Oct 18). Today the model writes free text with raw graph ids (`pr:482`, `person:rahul`), with no structure, no links and no @mentions. Proposed fix (needs your OK):
   1. **Code builds the message, not the model.** A Slack Block Kit message made from the structured report:
      - a header with severity and alert;
      - root cause, why it matters, and what was ruled out;
@@ -94,7 +94,7 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
   2. **Links:** "Open Lore" (the public CloudFront URL) and the GitHub issue (if it was approved first). The PRs and ADRs are fictional, so they have no real URLs; they appear as names.
   3. **@mentions:** an optional map from person to Slack member id (`LORE_SLACK_USER_IDS`), e.g. map Rahul to your own Slack id so the page lights up in the demo. Without the map, names are shown in bold.
   4. The same citation and audience checks still run before anything is sent.
-  > **Answer:**
+  > **Answer:** (Ayan, Oct 18) Structured message: yes. @mentions: no, bold names. **Built** (FIX_LOG F-16) and verified live: issue #2 + the formatted Slack post.
 
 ## B. Decisions an AI made that you must own (rules 12–13: "explain every part", "no AI slop")
 

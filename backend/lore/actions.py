@@ -113,9 +113,16 @@ def reject(action_id: str) -> Action:
 
 
 async def approve(
-    action_id: str, graph: GraphLike | None = None, settings: Settings | None = None
+    action_id: str,
+    graph: GraphLike | None = None,
+    settings: Settings | None = None,
+    rendered: dict | None = None,
 ) -> Action:
-    """Run the policy check, then send (or simulate) the action. Never raises on send errors."""
+    """Run the policy check, then send (or simulate) the action. Never raises on send errors.
+
+    `rendered` is the formatted message built by the API from the report: a Slack Block Kit
+    payload, or {"title", "body"} for a GitHub issue (lore/slack_format.py). Without it the raw
+    action text is sent."""
     settings = settings or get_settings()
     action = get(action_id)
     if action.status not in ("proposed", "failed"):
@@ -133,7 +140,7 @@ async def approve(
     action.status = "approved"
     action.blocked_reason = None
     try:
-        await _send(action, settings)
+        await _send(action, settings, rendered)
     except Exception as exc:  # the action stays visible with the error, so a human can retry
         action.status = "failed"
         action.blocked_reason = f"{type(exc).__name__}: {exc}"
@@ -165,7 +172,7 @@ async def _audience_problem(action: Action, graph: GraphLike | None) -> str | No
     return None if decision.allowed else (decision.reason or "Blocked by policy.")
 
 
-async def _send(action: Action, settings: Settings) -> None:
+async def _send(action: Action, settings: Settings, rendered: dict | None = None) -> None:
     """Fill in status/simulated/result_url on the action. Raises on real send failures."""
     if action.kind == "rollback":
         action.simulated = True
@@ -175,17 +182,20 @@ async def _send(action: Action, settings: Settings) -> None:
         if not settings.slack_webhook_url:
             _mark_simulated(action, "LORE_SLACK_WEBHOOK_URL is not set")
             return
-        await _request("POST", settings.slack_webhook_url, json={"text": action.text})
+        await _request("POST", settings.slack_webhook_url, json=rendered or {"text": action.text})
         action.status = "sent"
     elif action.kind == "github_issue":
         if not (settings.github_token and settings.github_repo):
             _mark_simulated(action, "LORE_GITHUB_TOKEN or LORE_GITHUB_REPO is not set")
             return
         title = action.title or action.text.splitlines()[0][:80]
+        body = action.text
+        if rendered:
+            title, body = rendered.get("title") or title, rendered.get("body") or body
         resp = await _request(
             "POST",
             f"https://api.github.com/repos/{settings.github_repo}/issues",
-            json={"title": title, "body": action.text},
+            json={"title": title, "body": body},
             headers={
                 "Authorization": f"Bearer {settings.github_token}",
                 "Accept": "application/vnd.github+json",
