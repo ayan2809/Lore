@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from lore import actions
 from lore.api import deps
-from lore.api.ratelimit import RateLimiter
+from lore.api.ratelimit import DailyBudget, RateLimiter
 from lore.api.routes import router
 from lore.config import Settings, get_settings
 from lore.db import GraphLike
@@ -119,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Routes read settings through Depends(get_settings); make that the settings given here.
     app.dependency_overrides[get_settings] = lambda: settings
     app.state.limiter = RateLimiter()
+    app.state.budget = DailyBudget()  # global daily caps on live Gemini work (R-31)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

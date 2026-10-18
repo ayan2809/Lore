@@ -288,7 +288,10 @@ export interface Api {
   setSession(persona: string): Promise<{ persona: Persona }>
   alerts(): Promise<AlertItem[]>
   graph(query?: GraphQuery): Promise<GraphView>
-  startInvestigation(req: StartInvestigationRequest): Promise<{ investigation_id: string }>
+  /** `replay_reason: 'daily_live_limit'` = today's live runs are used up, so a recording plays. */
+  startInvestigation(
+    req: StartInvestigationRequest,
+  ): Promise<{ investigation_id: string; replay?: boolean; replay_reason?: string | null }>
   /** Returns an unsubscribe function. `onClose` fires after `done` or on a fatal stream error. */
   subscribeToInvestigation(
     id: string,

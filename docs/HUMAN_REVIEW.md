@@ -4,16 +4,17 @@
 >
 > **How to answer:** write on the `> **Answer:**` line under the item (e.g. `> **Answer:** OK with C1–C8, but use ayan2809/kettle-incidents`), then tick the box `[x]` when nothing more is needed. A short answer is fine: "OK", "change X to Y", "skip". Agents read this file before working and act on your answers. They never tick a box or invent an answer for you.
 >
-> Agents: add new items at the bottom of the right section with the next free number (next free: **R-36**).
+> Agents: add new items at the bottom of the right section with the next free number (next free: **R-37**).
 
 ## Before deploying to AWS: what is still open
 
 The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304 unit tests), and local live testing passed ([FIX_LOG.md](FIX_LOG.md)). **The agent stopped before deploying because these need you:**
 
-1. **R-31:** budget raise, Gemini spend alert, **public-URL protection** (not implemented yet: anyone with the link can run paid investigations), and which secrets command to use (C10).
-2. **R-34:** keep `gemini-3.8-flash` as the reasoning model, or switch to Argon (sets the deploy's `ModelPro`).
-3. **R-32:** rotate the Gemini key (it was echoed into a test log), then use the new key for the deploy.
-4. Then run the deploy yourself (R-12 has the exact commands), or tell an agent "deploy", once 1–3 are answered.
+1. ~~R-31 public-URL protection~~ **built** (daily cap). Still yours: raise the budget, Gemini spend alert, and pick the secrets command (C10).
+2. ~~R-34~~ keep `gemini-3.8-flash` (decided).
+3. ~~R-32~~ key rotated (done).
+4. **R-36:** the Slack message format (proposal below).
+5. Then run the deploy yourself (R-12 has the exact commands), or tell an agent "deploy".
 
 ## A. Do now (blocking deploy or demo)
 
@@ -65,14 +66,14 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
      - (c) no extra protection: rely on the per-IP rate limit and the alerts.
   4. **Optional infra saving:** shrink the task from 1 vCPU / 2 GB to 0.5 vCPU / 1 GB (ARM). It saves about $0.55/day (~$16 per 30 days); the small graph fits, but investigations may feel slower. Keep 1 vCPU / 2 GB unless the budget is tight.
   5. **Which secrets command (C10)?** Both are built: `make aws-secrets-from-env` (copies the Gemini key, Slack webhook and GitHub token from your local `.env`, never printing them) or `make aws-secrets` (hidden prompts). Pick one; nothing else depends on it.
-  > **Answer:**
+  > **Answer:** (Ayan, Oct 18) Item 3: option (a), a global daily cap. **Built:** 100 live investigations per UTC day, then the recorded run, with a note in the trail; plus 1,000 Ask questions per day, then 429 (`LORE_LIVE_RUNS_PER_DAY`, `LORE_LIVE_ASKS_PER_DAY`, CloudFormation `LiveRunsPerDay`/`LiveAsksPerDay`). Item 4: keep 1 vCPU / 2 GB. **Still yours:** item 1 (raise the $12 AWS budget), item 2 (Gemini spend alert), item 5 (which secrets command).
 
 
-- [ ] **R-32 · Rotate the Gemini API key.** During testing, a malformed `.env` line made bash print part of the key into this session's tool output (FIX_LOG F-01). It never went into git or any file in the repo. Create a new key in AI Studio, put it in `.env`, delete the old one, and use the new one for the AWS secret.
-  > **Answer:**
+- [x] **R-32 · Rotate the Gemini API key.** During testing, a malformed `.env` line made bash print part of the key into this session's tool output (FIX_LOG F-01). It never went into git or any file in the repo. Create a new key in AI Studio, put it in `.env`, delete the old one, and use the new one for the AWS secret.
+  > **Answer:** Done by Ayan (Oct 18). An agent checked it works (embeddings + Flash-Lite) and that it differs from the old key (hash comparison); the local backup holding the old key was deleted. Delete the old key in AI Studio if you haven't.
 
-- [ ] **R-34 · Reasoning model: keep `gemini-3.8-flash` or switch to `gemini-4-argon`?** Measured on Oct 18 (FIX_LOG, last section): both 3/3 correct with the same red-herring rejection; 3.8-flash is ~1.5× faster ($0.022–0.024 vs $0.040–0.043 per investigation), and Argon doubles in price on Dec 1. **Recommendation: keep 3.8-flash** (the infra default `ModelPro=gemini-3.8-flash`). Also: keep `gemini-3.5-flash-lite` for the other agents and Ask?
-  > **Answer:**
+- [x] **R-34 · Reasoning model: keep `gemini-3.8-flash` or switch to `gemini-4-argon`?** Measured on Oct 18 (FIX_LOG, last section): both 3/3 correct with the same red-herring rejection; 3.8-flash is ~1.5× faster ($0.022–0.024 vs $0.040–0.043 per investigation), and Argon doubles in price on Dec 1. **Recommendation: keep 3.8-flash** (the infra default `ModelPro=gemini-3.8-flash`). Also: keep `gemini-3.5-flash-lite` for the other agents and Ask?
+  > **Answer:** Keep `gemini-3.8-flash` (Ayan, Oct 18): faster, cheaper, correct on the evals. Infra default `ModelPro=gemini-3.8-flash`.
 
 - [ ] **R-35 · Things the live test showed you should know before the demo:**
   - **Real actions went out:** one Slack post to your webhook channel and GitHub issue #1 in `kettle-incidents`, both prefixed "[Lore local test - please ignore]". Delete or close them before recording if you like.
@@ -80,6 +81,19 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
   - **Who to contact is now decided by code (F-03):** page = the owning team's lead of the service where the root cause landed; consult = top 2 experts; notify = the PR author. The model only words it.
   - **Story B memory demo:** with the learned playbook the Investigator takes **4 steps instead of 8** (not "11 → 4" as the plan's video script says). Use the measured numbers in the video.
   - **First run on AWS:** about a minute of downtime per deploy (single task); the FalkorDB image is pulled from Docker Hub anonymously (a rate-limit failure is fixed by `infra/deploy.sh restart`).
+  > **Answer:**
+
+
+- [ ] **R-36 · The Slack message is informative but badly presented** (Ayan, Oct 18). Today the model writes free text with raw graph ids (`pr:482`, `person:rahul`), with no structure, no links and no @mentions. Proposed fix (needs your OK):
+  1. **Code builds the message, not the model.** A Slack Block Kit message made from the structured report:
+     - a header with severity and alert;
+     - root cause, why it matters, and what was ruled out;
+     - the people;
+     - links.
+     Ids become human names ("PR #482 by Priya Nair", "ADR-011"). The model's text shrinks to one editable summary line, so nothing invented reaches Slack.
+  2. **Links:** "Open Lore" (the public CloudFront URL) and the GitHub issue (if it was approved first). The PRs and ADRs are fictional, so they have no real URLs; they appear as names.
+  3. **@mentions:** an optional map from person to Slack member id (`LORE_SLACK_USER_IDS`), e.g. map Rahul to your own Slack id so the page lights up in the demo. Without the map, names are shown in bold.
+  4. The same citation and audience checks still run before anything is sent.
   > **Answer:**
 
 ## B. Decisions an AI made that you must own (rules 12–13: "explain every part", "no AI slop")

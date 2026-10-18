@@ -24,9 +24,14 @@ export function useInvestigation() {
       const token = ++runToken.current
       dispatch({ t: 'starting', alertId, mode, replay })
       try {
-        const { investigation_id } = await api.startInvestigation({ alert_id: alertId, mode, replay })
+        const started = await api.startInvestigation({ alert_id: alertId, mode, replay })
+        const investigation_id = started.investigation_id
         if (token !== runToken.current) return
-        dispatch({ t: 'started', investigationId: investigation_id })
+        const notice =
+          started.replay_reason === 'daily_live_limit'
+            ? "Today's live runs for this public demo are used up, so this is a recorded run of the same incident."
+            : undefined
+        dispatch({ t: 'started', investigationId: investigation_id, notice })
 
         unsubscribe.current = api.subscribeToInvestigation(
           investigation_id,

@@ -9,6 +9,7 @@ single-task demo. Each IP gets `limit` requests per minute, refilled continuousl
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request
 
@@ -29,6 +30,39 @@ class RateLimiter:
             return 0.0
         self._buckets[key] = (tokens, now)
         return (1 - tokens) * 60 / per_minute
+
+
+class DailyBudget:
+    """A global cap on paid Gemini work per UTC day, across ALL visitors (HUMAN_REVIEW R-31).
+
+    The per-IP limit above slows one visitor down but does not cap the total bill on a public URL.
+    This does: after `limit` live investigations in a day, the API plays a recorded run instead.
+    Counts live in memory: exact for our single ECS task, and a restart resets them (acceptable for
+    a demo; a multi-task setup would keep them in Redis/FalkorDB).
+    """
+
+    def __init__(self) -> None:
+        self._day = ""
+        self._used: dict[str, int] = {}
+
+    def _roll(self, today: str | None) -> None:
+        today = today or datetime.now(UTC).date().isoformat()
+        if today != self._day:
+            self._day, self._used = today, {}
+
+    def take(self, kind: str, limit: int, today: str | None = None) -> bool:
+        """Use one unit of today's budget for `kind`. False when it is used up. 0 = no cap."""
+        self._roll(today)
+        if limit <= 0:
+            return True
+        if self._used.get(kind, 0) >= limit:
+            return False
+        self._used[kind] = self._used.get(kind, 0) + 1
+        return True
+
+    def remaining(self, kind: str, limit: int, today: str | None = None) -> int | None:
+        self._roll(today)
+        return None if limit <= 0 else max(0, limit - self._used.get(kind, 0))
 
 
 def _strip_port(address: str) -> str:

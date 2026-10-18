@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     session_secret: str = "dev-only-change-me"
     cors_origins: list[str] = ["http://localhost:5173"]
     rate_limit_per_minute: int = 20
+    # Global caps on paid Gemini work per UTC day (all visitors together; 0 = no cap). After the
+    # cap, investigations play a recorded run and Ask returns 429 (HUMAN_REVIEW R-31).
+    live_runs_per_day: int = 100
+    live_asks_per_day: int = 1000
     # True when the site is served over HTTPS (the cookie then gets the Secure flag). Off by
     # default so http://localhost works. On AWS (CloudFront) it is true.
     cookie_secure: bool = False

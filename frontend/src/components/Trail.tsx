@@ -135,10 +135,14 @@ export default function Trail({ trail, status, activeSeq, selectedSeq, onSelect,
                   <div
                     key={item.seq}
                     className={`rounded-lg border px-3 py-2 text-sm ${
-                      item.level === 'blocked' ? 'border-red-500/50 bg-red-500/10 text-red-200' : 'border-amber-500/50 bg-amber-500/10 text-amber-200'
+                      item.level === 'blocked'
+                        ? 'border-red-500/50 bg-red-500/10 text-red-200'
+                        : item.level === 'info'
+                          ? 'border-sky-500/50 bg-sky-500/10 text-sky-200'
+                          : 'border-amber-500/50 bg-amber-500/10 text-amber-200'
                     }`}
                   >
-                    {item.level === 'blocked' ? 'Policy blocked: ' : 'Error: '}
+                    {item.level === 'blocked' ? 'Policy blocked: ' : item.level === 'info' ? 'Note: ' : 'Error: '}
                     {item.message}
                   </div>
                 )

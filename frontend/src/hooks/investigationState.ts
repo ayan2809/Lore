@@ -28,7 +28,7 @@ export type TrailItem =
       error: string | null
     }
   | { kind: 'finding'; seq: number; agent: string | null; text: string; citations: string[]; confidence: number }
-  | { kind: 'notice'; seq: number; level: 'error' | 'blocked'; message: string }
+  | { kind: 'notice'; seq: number; level: 'error' | 'blocked' | 'info'; message: string }
 
 export type ToolItem = Extract<TrailItem, { kind: 'tool' }>
 
@@ -66,7 +66,7 @@ export const initialState: InvestigationState = {
 
 export type Message =
   | { t: 'starting'; alertId: string; mode: GraphMode; replay: boolean }
-  | { t: 'started'; investigationId: string }
+  | { t: 'started'; investigationId: string; notice?: string }
   | { t: 'event'; event: StepEvent }
   | { t: 'select'; seq: number | null }
   | { t: 'action'; action: Action }
@@ -84,7 +84,13 @@ export function reduce(state: InvestigationState, msg: Message): InvestigationSt
     case 'starting':
       return { ...initialState, status: 'starting', alertId: msg.alertId, mode: msg.mode, replay: msg.replay }
     case 'started':
-      return { ...state, status: 'running', investigationId: msg.investigationId }
+      return {
+        ...state,
+        status: 'running',
+        investigationId: msg.investigationId,
+        // e.g. "today's live runs are used up": shown at the top of the trail (seq 0 sorts first)
+        trail: msg.notice ? [{ kind: 'notice', seq: 0, level: 'info', message: msg.notice }] : state.trail,
+      }
     case 'select':
       return { ...state, selectedSeq: msg.seq }
     case 'action':

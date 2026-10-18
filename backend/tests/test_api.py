@@ -343,3 +343,24 @@ def test_api_starts_and_serves_when_falkordb_and_gemini_are_missing():
         assert health["replay"] is True
         assert len(client.get("/api/alerts").json()) == 2  # static fallback alerts
         assert client.get("/api/graph").status_code == 503
+
+
+def test_daily_live_cap_falls_back_to_the_recorded_run():
+    """R-31: after `live_runs_per_day` live runs, everyone gets the recording instead."""
+    client, seen, _ = build_client(live_runs_per_day=1)
+    with client:
+        login(client, "arjun")
+        first = client.post("/api/investigations", json={"alert_id": "A-3001"}).json()
+        second = client.post("/api/investigations", json={"alert_id": "A-3001"}).json()
+        assert first["replay"] is False and first["replay_reason"] is None
+        assert second["replay"] is True and second["replay_reason"] == "daily_live_limit"
+        assert client.get("/api/health").json()["live_runs_left_today"] == 0
+
+
+def test_daily_ask_cap_returns_429():
+    client, _, _ = build_client(live_asks_per_day=1)
+    with client:
+        login(client, "arjun")
+        client.app.state.budget.take("ask", 1)  # use up today's single question
+        r = client.post("/api/ask", json={"question": "Who owns pricing?", "mode": "graph"})
+        assert r.status_code == 429 and "tomorrow" in r.json()["detail"]

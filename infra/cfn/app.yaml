@@ -37,6 +37,14 @@ Parameters:
     Type: Number
     Default: 20
     Description: Per-visitor limit on starting investigations and asking questions.
+  LiveRunsPerDay:
+    Type: Number
+    Default: 100
+    Description: Global cap on live (paid) investigations per UTC day; after it, visitors get the recorded run (HUMAN_REVIEW R-31). 0 = no cap.
+  LiveAsksPerDay:
+    Type: Number
+    Default: 1000
+    Description: Global cap on live Ask questions per UTC day; after it, Ask returns 429. 0 = no cap.
 
 Resources:
   # ---------------------------------------------------------------- logs
@@ -270,6 +278,8 @@ Resources:
             - { Name: LORE_FAKE_EMBEDDINGS, Value: "false" }
             - { Name: LORE_GITHUB_REPO, Value: !Ref GithubRepo }
             - { Name: LORE_RATE_LIMIT_PER_MINUTE, Value: !Ref RateLimitPerMinute }
+            - { Name: LORE_LIVE_RUNS_PER_DAY, Value: !Ref LiveRunsPerDay } # protects the Gemini bill on the public URL
+            - { Name: LORE_LIVE_ASKS_PER_DAY, Value: !Ref LiveAsksPerDay }
             - { Name: LORE_CORS_ORIGINS, Value: "[]" } # page and API share one origin, so no CORS is needed
             - { Name: LORE_COOKIE_SECURE, Value: "true" } # the site is HTTPS-only (CloudFront)
             - { Name: LORE_LOAD_ON_START, Value: if_empty } # first boot: load the Kettle data in the background

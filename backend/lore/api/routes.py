@@ -16,7 +16,7 @@ import asyncio
 import inspect
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -113,7 +113,9 @@ async def _maybe_await(value: Any) -> Any:
 
 @router.get("/health")
 async def health(
-    settings: Settings = Depends(get_settings), graph: GraphLike | None = Depends(deps.get_graph)
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    graph: GraphLike | None = Depends(deps.get_graph),
 ) -> dict:
     falkordb = False
     if graph is not None:
@@ -125,8 +127,10 @@ async def health(
             # loader just has not run (FIX_LOG F-08).
             falkordb = "empty key" in str(exc).lower()
     gemini = bool(settings.gemini_api_key)
+    budget = request.app.state.budget
     return {"status": "ok", "falkordb": falkordb, "gemini": gemini,
-            "replay": settings.force_replay or not gemini}
+            "replay": settings.force_replay or not gemini,
+            "live_runs_left_today": budget.remaining("investigation", settings.live_runs_per_day)}
 
 
 @router.get("/personas")
@@ -198,6 +202,7 @@ async def source(
 
 @router.post("/investigations", dependencies=[Depends(rate_limit)])
 async def start_investigation(
+    request: Request,
     body: StartBody,
     persona: str = Depends(current_persona),
     viewer: Viewer = Depends(current_viewer),
@@ -207,16 +212,22 @@ async def start_investigation(
     registry: RunRegistry = Depends(runs.get_registry),
 ) -> dict:
     use_replay = body.replay or settings.force_replay or llm is None
+    replay_reason = None
+    if not use_replay and not request.app.state.budget.take(
+        "investigation", settings.live_runs_per_day
+    ):
+        # Public-URL protection (R-31): today's live runs are used up, so play the recording.
+        use_replay, replay_reason = True, "daily_live_limit"
     if not use_replay:
         deps.require_graph(graph)
     run = registry.create(viewer.id, body.alert_id, body.mode, use_replay)
     log_event(event="investigation_start", investigation_id=run.id, viewer=viewer.id,
-              alert_id=body.alert_id, mode=body.mode, replay=use_replay)
+              alert_id=body.alert_id, mode=body.mode, replay=use_replay, reason=replay_reason)
     if use_replay:
         registry.start_replay(run, replay.find_replay(body.alert_id, persona, settings))
     else:
         registry.start_live(run, viewer, llm, graph, settings)
-    return {"investigation_id": run.id}
+    return {"investigation_id": run.id, "replay": use_replay, "replay_reason": replay_reason}
 
 
 @router.get("/investigations/{investigation_id}/events")
@@ -277,7 +288,9 @@ async def feedback(
 
 @router.post("/ask", dependencies=[Depends(rate_limit)])
 async def ask_the_brain(
+    request: Request,
     body: AskBody,
+    settings: Settings = Depends(get_settings),
     viewer: Viewer = Depends(current_viewer),
     graph: GraphLike | None = Depends(deps.get_graph),
     llm=Depends(deps.get_llm),
@@ -290,6 +303,9 @@ async def ask_the_brain(
                          refused=True, claims=[Claim(text=decision.reason or "Blocked by policy.")])
     if llm is None:
         raise HTTPException(503, "Gemini is not configured, so Ask is unavailable (no replay).")
+    if not request.app.state.budget.take("ask", settings.live_asks_per_day):
+        raise HTTPException(429, "Today's limit of live questions is used up (it protects the "
+                                 "Gemini bill on this public demo). Please try again tomorrow.")
     with Timer() as timer:
         answer = await ask.ask(
             body.question, viewer, mode=body.mode, llm=llm, graph=deps.require_graph(graph)
