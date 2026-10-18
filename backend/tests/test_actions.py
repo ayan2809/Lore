@@ -15,7 +15,10 @@ from lore.db import QueryOutcome
 
 def fake_policy(monkeypatch, allowed=True, reason=""):
     decision = types.SimpleNamespace(allowed=allowed, reason=reason)
-    fake = types.SimpleNamespace(check_post_audience=lambda graph, channel_id, cited: decision)
+    fake = types.SimpleNamespace(
+        check_post_audience=lambda graph, channel_id, cited: decision,
+        check_issue_citations=lambda graph, cited: decision,
+    )
     monkeypatch.setitem(sys.modules, "lore.policy", fake)
     monkeypatch.setattr(lore, "policy", fake, raising=False)
 
@@ -91,7 +94,8 @@ async def test_policy_error_fails_closed(monkeypatch, http):
     assert done.status == "blocked" and http[0] == []
 
 
-async def test_github_issue_returns_url_and_uses_configured_repo(http):
+async def test_github_issue_returns_url_and_uses_configured_repo(monkeypatch, http):
+    fake_policy(monkeypatch)
     calls, _ = http
     s = settings(github_token="tok", github_repo="kettle/ops")
     a = actions.propose("inv:t6", "github_issue", "attacker/repo", "body", ["pr:482"], title="T")
@@ -153,3 +157,25 @@ def test_propose_saves_action_node_when_graph_configured():
     cypher, params = graph.writes[-1]
     assert "MERGE (a:Action" in cypher
     assert params["id"] == a.id and params["text"] == "hi again" and params["status"] == "proposed"
+
+
+async def test_github_issue_citing_a_restricted_source_is_blocked_until_the_citation_is_dropped(
+    http,
+):
+    """FIX_LOG F-09: the demo repo is public, so restricted sources may not be cited there."""
+
+    class Graph:
+        def ro(self, cypher, params):
+            bad = [i for i in params["cited_ids"] if i.startswith("thread:pricing-private")]
+            return QueryOutcome(["source_id", "access_level"], [[i, "restricted"] for i in bad], 1)
+
+    s = settings(github_token="t", github_repo="o/r")
+    cited = ["pr:482", "thread:pricing-private-0142"]
+    a = actions.propose("inv:t9", "github_issue", "o/r", "body", cited, title="T")
+    blocked = await actions.approve(a.id, Graph(), s)
+    assert blocked.status == "blocked" and "thread:pricing-private-0142" in blocked.blocked_reason
+    assert http[0] == []  # nothing was sent
+
+    actions.edit(a.id, "body without the private part", cited_ids=["pr:482", "pr:999"])
+    assert actions.get(a.id).cited_ids == ["pr:482"]  # can drop citations, never add new ones
+    assert (await actions.approve(a.id, Graph(), s)).status == "sent"

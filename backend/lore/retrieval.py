@@ -70,6 +70,8 @@ class Candidate(BaseModel):
     graph: float = 0.0
     recency: float = 0.0
     score: float = 0.0  # final score, set by rerank()
+    # Graph facts only: ids of the related nodes named in `text`, which an answer may cite too.
+    related_ids: list[str] = []
 
 
 def distance_to_similarity(distance: float) -> float:
@@ -166,3 +168,75 @@ def restricted_match_count(
     team = team[:1].upper() + team[1:]
     lead = f" ({top['lead']})" if top.get("lead") else ""
     return total, f"ask the {team} team{lead}"
+
+
+# ------------------------------------------------------------------ graph facts (FIX_LOG F-06)
+
+# Nodes with no access_level that every viewer may see (same list as visible_ids.cypher).
+OPEN_LABELS = ["Person", "Team", "Role", "Channel", "Service", "Repo", "CodeModule", "Alert"]
+MAX_LINKS_PER_TYPE = 6  # a service has ~140 deploys; keep the text short
+
+
+def entity_facts(
+    ctx: ToolContext, ids: list[str], *, outcomes: list | None = None
+) -> list[Candidate]:
+    """One Candidate per named node the viewer may see, whose text lists what the graph knows
+    about it ("pr:482 was AUTHORED by person:priya (Priya Nair)"). Permission-filtered in Cypher.
+    """
+    if not ids:
+        return []
+    rows = _run(ctx, "ask_entity_facts", {"ids": ids, "open_labels": OPEN_LABELS}, outcomes)
+    out = []
+    for row in rows.dicts():
+        text, related = render_facts(row)
+        out.append(
+            Candidate(
+                id=row["id"],
+                source="graph",
+                title=row.get("name"),
+                text=text,
+                updated_at=row.get("updated_at"),
+                access_level=row.get("access_level"),
+                label=row.get("label"),
+                related_ids=related,
+                # Named in the question and connected in the graph: rank it at the top.
+                meaning=1.0,
+                graph=1.0,
+            )
+        )
+    return out
+
+
+def render_facts(row: dict) -> tuple[str, list[str]]:
+    """Plain sentences the model can cite from, plus the ids they mention."""
+    head = f"{row['id']} is a {row['label']}"
+    if row.get("name"):
+        head += f" named {row['name']!r}"
+    if row.get("title") and row.get("title") != row.get("name"):
+        head += f" (title: {row['title']})"
+    for key in ("tier", "status"):
+        if row.get(key) is not None:
+            head += f", {key} {row[key]}"
+    lines, related = [head + "."], []
+    if row.get("lead"):
+        lines.append(f"Its lead is {row['lead']}.")
+        related.append(row["lead"])
+    by_type: dict[tuple[str, bool], list[dict]] = {}
+    for f in row.get("facts") or []:
+        if f.get("id"):
+            by_type.setdefault((f["rel"], bool(f["outgoing"])), []).append(f)
+    for (rel, outgoing), links in sorted(by_type.items()):
+        shown = links[:MAX_LINKS_PER_TYPE]
+        names = []
+        for f in shown:
+            label = f"{f['id']} ({f['name']})" if f.get("name") else f["id"]
+            if f.get("since") or f.get("until"):
+                label += f" [from {f.get('since') or '?'} to {f.get('until') or 'now'}]"
+            names.append(label)
+            related.append(f["id"])
+        more = f" and {len(links) - len(shown)} more" if len(links) > len(shown) else ""
+        verb = rel if outgoing else f"is the target of {rel} from"
+        lines.append(f"{row['id']} {verb}: {', '.join(names)}{more}.")
+    if row.get("text"):
+        lines.append("Text: " + row["text"])
+    return "\n".join(lines), related

@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lore frontend: a private S3 bucket for the React build, and one CloudFront distribution that serves
+  the page from S3 and forwards /api/* to the load balancer. One domain for both, so no CORS and a first-party cookie.
+
+Parameters:
+  OriginVerifySecret:
+    Type: String
+    NoEcho: true
+    MinLength: 20
+    Description: Value CloudFront sends in the X-Origin-Verify header (deploy.sh reads it from the secret lore/origin-verify).
+
+Resources:
+  # The React build (index.html + hashed assets). Fully private: only CloudFront may read it.
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub lore-web-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: Name, Value: !Sub "lore-web-${AWS::AccountId}" }
+        - { Key: project, Value: lore }
+
+  # Origin Access Control: CloudFront signs its requests to S3, so the bucket can stay private.
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: lore-web-oac
+        Description: CloudFront to the private lore-web bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Bucket policy: only THIS distribution may read objects.
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowThisDistributionToRead
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${WebBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  # What CloudFront passes on to the API: every cookie, every query string and the viewer's headers
+  # (Host is included too, which our ALB ignores), plus two headers CloudFront computes itself: the
+  # visitor's address (used for the rate limit) and whether they came in over HTTPS.
+  ApiOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: lore-api-forward
+        Comment: Forward cookies, query strings and viewer headers plus CloudFront-Viewer-Address to the API
+        CookiesConfig:
+          CookieBehavior: all
+        QueryStringsConfig:
+          QueryStringBehavior: all
+        HeadersConfig:
+          HeaderBehavior: allViewerAndWhitelistCloudFront
+          Headers:
+            - CloudFront-Viewer-Address
+            - CloudFront-Forwarded-Proto
+
+  # The one public address (https://dxxxx.cloudfront.net). "/*" is the web page from S3 (cached);
+  # "/api/*" goes to the load balancer, uncached, with the secret header attached.
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: lore
+        PriceClass: PriceClass_200 # includes India; cheaper than all edge locations
+        HttpVersion: http2and3
+        DefaultRootObject: index.html
+        # No CustomErrorResponses on purpose: they would turn the API's deliberate 404s (a source the
+        # viewer may not see) into the HTML page.
+        Origins:
+          - Id: web-s3
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: "" # empty because we use OAC, not the old OAI
+          - Id: api-alb
+            DomainName: !ImportValue lore-app-AlbDnsName
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only # the CloudFront-to-ALB hop is plain HTTP (D-16)
+              HTTPPort: 80
+              OriginReadTimeout: 60 # the API sends an SSE ping every 15 s, well inside this
+              OriginKeepaliveTimeout: 60
+            OriginCustomHeaders:
+              - HeaderName: X-Origin-Verify
+                HeaderValue: !Ref OriginVerifySecret
+        DefaultCacheBehavior:
+          TargetOriginId: web-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # managed CachingOptimized
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api-alb
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false # compression can hold back SSE chunks
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # managed CachingDisabled
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+      Tags:
+        - { Key: Name, Value: lore }
+        - { Key: project, Value: lore }
+
+Outputs:
+  PublicUrl:
+    Value: !Sub "https://${Distribution.DomainName}"
+  DistributionId:
+    Value: !Ref Distribution
+  BucketName:
+    Value: !Ref WebBucket

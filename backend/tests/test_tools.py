@@ -45,7 +45,7 @@ CONTENT_QUERIES = [
     "visible_ids",
 ]
 # Checks the permission of each channel reader instead of the viewer, so it has no $viewer.
-AUDIENCE_QUERIES = ["post_audience_check"]
+AUDIENCE_QUERIES = ["post_audience_check", "policy_restricted_citations"]  # policy checks
 # Files owned by this work package (the memory_/action_ files belong to other agents).
 MY_QUERIES = (
     CONTENT_QUERIES

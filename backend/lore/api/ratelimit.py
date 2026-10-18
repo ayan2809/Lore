@@ -1,7 +1,7 @@
 """Tiny in-memory per-IP token bucket (plan section 14, Day 4: protect the Gemini bill).
 
 Applied to POST /investigations and POST /ask. State lives in one process, which is fine for a
-single-VM demo. Each IP gets `limit` requests per minute, refilled continuously.
+single-task demo. Each IP gets `limit` requests per minute, refilled continuously.
 """
 
 # ruff: noqa: B008  (FastAPI's `Depends(...)` as a default value is the standard pattern)
@@ -31,11 +31,33 @@ class RateLimiter:
         return (1 - tokens) * 60 / per_minute
 
 
+def _strip_port(address: str) -> str:
+    """'203.0.113.7:4821' -> '203.0.113.7'. CloudFront sends IPv6 without brackets, as
+    '2001:db8::1:443', so the port is whatever follows the LAST colon. '[2001:db8::1]:443' (the
+    bracketed form) is handled too."""
+    address = address.strip()
+    if address.startswith("["):
+        return address[1:].split("]", 1)[0]
+    head, sep, _port = address.rpartition(":")
+    return head if sep else address
+
+
 def client_ip(request: Request) -> str:
-    """Behind Caddy the real client is the LAST X-Forwarded-For entry (the one Caddy appended)."""
+    """The caller's IP address, used as the rate-limit key.
+
+    On AWS the request reaches us through CloudFront and an ALB, so `request.client.host` is the
+    load balancer. CloudFront adds `CloudFront-Viewer-Address` ("ip:port") with the real viewer.
+    These headers are only trustworthy because the ALB rejects every request that lacks the secret
+    `X-Origin-Verify` header (which only our CloudFront distribution sends); otherwise anyone could
+    send a fake header and dodge the limit. Fallbacks: the first `X-Forwarded-For` entry (the
+    original client when the ALB is the only proxy), then the direct peer (local runs).
+    """
+    viewer = request.headers.get("cloudfront-viewer-address")
+    if viewer:
+        return _strip_port(viewer)
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[-1].strip()
+        return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 

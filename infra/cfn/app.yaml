@@ -1,0 +1,420 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lore app: one ECS Fargate task (API container + FalkorDB sidecar) with the graph stored on EFS,
+  behind an internet-facing load balancer that only answers requests carrying the secret CloudFront header.
+
+Parameters:
+  ImageTag:
+    Type: String
+    Description: Tag of the lore-api image in ECR (deploy.sh passes the git sha). Roll back by deploying an older tag.
+    AllowedPattern: "[A-Za-z0-9_.-]{1,128}"
+  OriginVerifySecret:
+    Type: String
+    NoEcho: true
+    MinLength: 20
+    Description: Value of the X-Origin-Verify header (deploy.sh reads it from the secret lore/origin-verify).
+  EmbedDim:
+    Type: Number
+    Default: 768
+    Description: Embedding vector size. The vector index in the graph must use the same number.
+  GithubRepo:
+    Type: String
+    Default: ayan2809/kettle-incidents
+    Description: Demo repo that receives GitHub issues, as owner/name.
+  ModelPro:
+    Type: String
+    Default: gemini-3.8-flash
+    Description: Gemini model for the Investigator (LORE_MODEL_PRO).
+  ModelFlash:
+    Type: String
+    Default: gemini-3.5-flash-lite
+    Description: Gemini model for the other agents (LORE_MODEL_FLASH).
+  ModelEmbed:
+    Type: String
+    Default: gemini-embedding-2
+    Description: Gemini embedding model (LORE_MODEL_EMBED).
+  RateLimitPerMinute:
+    Type: Number
+    Default: 20
+    Description: Per-visitor limit on starting investigations and asking questions.
+
+Resources:
+  # ---------------------------------------------------------------- logs
+  # Where the containers write their output. Kept 3 days (CloudWatch only allows 1, 3, 5, 7, 14, ...).
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /lore/api
+      RetentionInDays: 3
+
+  FalkorDbLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /lore/falkordb
+      RetentionInDays: 3
+
+  # ---------------------------------------------------------------- storage (EFS)
+  # The graph lives here, so it survives task restarts and redeploys. Encrypted at rest.
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: elastic # pay per use; no burst-credit surprises for a tiny database
+      FileSystemTags:
+        - { Key: Name, Value: lore-efs }
+        - { Key: project, Value: lore }
+
+  # One mount target per availability zone, so the task can reach EFS whichever subnet it lands in.
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !ImportValue lore-network-PublicSubnetA
+      SecurityGroups: [!ImportValue lore-network-EfsSecurityGroup]
+
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !ImportValue lore-network-PublicSubnetB
+      SecurityGroups: [!ImportValue lore-network-EfsSecurityGroup]
+
+  # The task can only enter EFS through this "door": it fixes the user and the folder (/falkordb).
+  # The FalkorDB image runs as root (its config has no User), so the door acts as uid/gid 0 and
+  # creates /falkordb owned by root. Nothing else on the file system is reachable.
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser: { Uid: "0", Gid: "0" }
+      RootDirectory:
+        Path: /falkordb
+        CreationInfo: { OwnerUid: "0", OwnerGid: "0", Permissions: "755" }
+      AccessPointTags:
+        - { Key: Name, Value: lore-efs-ap }
+        - { Key: project, Value: lore }
+
+  # ---------------------------------------------------------------- roles
+  # Used by ECS itself while starting the task: pull the image, write logs, read the one secret.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lore-task-exec-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: lore-task-exec-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrLogin
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*" # this one action cannot be limited to a repository
+              - Sid: PullApiImage
+                Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !ImportValue lore-registry-RepositoryArn
+              - Sid: WriteLogs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource:
+                  - !Sub "${ApiLogGroup.Arn}:*"
+                  - !Sub "${FalkorDbLogGroup.Arn}:*"
+              - Sid: ReadOnlyTheAppSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !ImportValue lore-registry-AppSecretArn
+      Tags:
+        - { Key: Name, Value: lore-task-exec-role }
+        - { Key: project, Value: lore }
+
+  # Used by our own code inside the task. The app calls no AWS APIs, so this role only allows
+  # "ECS Exec" (a shell for debugging) and mounting/writing the one EFS access point.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lore-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: lore-task-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*" # these actions do not support resource-level limits
+              - Sid: UseTheEfsAccessPoint
+                Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess # FalkorDB runs as root inside the container
+                Resource: !GetAtt FileSystem.Arn
+                Condition:
+                  StringEquals:
+                    "elasticfilesystem:AccessPointArn": !GetAtt AccessPoint.Arn
+      Tags:
+        - { Key: Name, Value: lore-task-role }
+        - { Key: project, Value: lore }
+
+  # ---------------------------------------------------------------- ECS
+  # The home of the service. Fargate means AWS runs the servers; we only describe the containers.
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: lore
+      Tags:
+        - { Key: Name, Value: lore }
+        - { Key: project, Value: lore }
+
+  # The recipe for the task: two containers that share localhost and 1 vCPU / 2 GB, on ARM64.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: lore-api
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: falkordb-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref FileSystem
+            TransitEncryption: ENABLED # NFS traffic is encrypted in flight
+            AuthorizationConfig:
+              AccessPointId: !Ref AccessPoint
+              IAM: ENABLED # the task role above decides who may mount
+      ContainerDefinitions:
+        # The database. Starts first; the API waits until its health check passes.
+        - Name: falkordb
+          Image: falkordb/falkordb-server:v4.18.3
+          Essential: true
+          Cpu: 256
+          MemoryReservation: 768
+          # The image's start script (run.sh) ignores command-line arguments: it builds the redis-server
+          # command itself from $REDIS_ARGS, $FALKORDB_DATA_PATH (the --dir) and $FALKORDB_ARGS. So we
+          # set REDIS_ARGS here, where the password from Secrets Manager can be put into it, and then
+          # hand over to run.sh. "--appendonly yes" makes Redis journal every write to the EFS volume.
+          EntryPoint: [sh, -c]
+          Command:
+            - >-
+              export REDIS_ARGS="--requirepass $FALKORDB_PASSWORD --appendonly yes";
+              exec /var/lib/falkordb/bin/run.sh
+          Environment:
+            # Replaces the image's "TIMEOUT 1000" (a 1 s cap on every query) with a 2 s default and a 30 s ceiling.
+            - Name: FALKORDB_ARGS
+              Value: MAX_QUEUED_QUERIES 25 TIMEOUT_DEFAULT 2000 TIMEOUT_MAX 30000 RESULTSET_SIZE 10000
+          Secrets:
+            - Name: FALKORDB_PASSWORD
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_FALKORDB_PASSWORD::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+          MountPoints:
+            - { SourceVolume: falkordb-data, ContainerPath: /var/lib/falkordb/data, ReadOnly: false }
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - REDISCLI_AUTH="$FALKORDB_PASSWORD" redis-cli ping | grep -q PONG
+            Interval: 10
+            Timeout: 5
+            Retries: 5
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FalkorDbLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: falkordb
+        # Our FastAPI app (one uvicorn worker). It reaches FalkorDB on localhost:6379.
+        - Name: api
+          Image: !Sub
+            - "${RepoUri}:${ImageTag}"
+            - RepoUri: !ImportValue lore-registry-RepositoryUri
+          Essential: true
+          Cpu: 768
+          MemoryReservation: 1280
+          PortMappings:
+            - { ContainerPort: 8000, Protocol: tcp }
+          DependsOn:
+            - { ContainerName: falkordb, Condition: HEALTHY }
+          Environment:
+            - { Name: LORE_FALKORDB_HOST, Value: localhost }
+            - { Name: LORE_FALKORDB_PORT, Value: "6379" }
+            - { Name: LORE_GRAPH_NAME, Value: org_kettle }
+            - { Name: LORE_QUERY_TIMEOUT_MS, Value: "2000" }
+            - { Name: LORE_MODEL_PRO, Value: !Ref ModelPro }
+            - { Name: LORE_MODEL_FLASH, Value: !Ref ModelFlash }
+            - { Name: LORE_MODEL_EMBED, Value: !Ref ModelEmbed }
+            - { Name: LORE_EMBED_DIM, Value: !Ref EmbedDim }
+            - { Name: LORE_FAKE_EMBEDDINGS, Value: "false" }
+            - { Name: LORE_GITHUB_REPO, Value: !Ref GithubRepo }
+            - { Name: LORE_RATE_LIMIT_PER_MINUTE, Value: !Ref RateLimitPerMinute }
+            - { Name: LORE_CORS_ORIGINS, Value: "[]" } # page and API share one origin, so no CORS is needed
+            - { Name: LORE_COOKIE_SECURE, Value: "true" } # the site is HTTPS-only (CloudFront)
+            - { Name: LORE_LOAD_ON_START, Value: if_empty } # first boot: load the Kettle data in the background
+          Secrets:
+            - Name: LORE_GEMINI_API_KEY
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_GEMINI_API_KEY::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+            - Name: LORE_SLACK_WEBHOOK_URL
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_SLACK_WEBHOOK_URL::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+            - Name: LORE_GITHUB_TOKEN
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_GITHUB_TOKEN::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+            - Name: LORE_SESSION_SECRET
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_SESSION_SECRET::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+            - Name: LORE_FALKORDB_PASSWORD
+              ValueFrom: !Sub
+                - "${SecretArn}:LORE_FALKORDB_PASSWORD::"
+                - SecretArn: !ImportValue lore-registry-AppSecretArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+      Tags:
+        - { Key: Name, Value: lore-api }
+        - { Key: project, Value: lore }
+
+  # ---------------------------------------------------------------- load balancer
+  # The public door for the API. CloudFront calls it over plain HTTP; the firewall (CloudFront's
+  # IP list) and the secret header below are what keep everyone else out.
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: lore-alb
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !ImportValue lore-network-PublicSubnetA
+        - !ImportValue lore-network-PublicSubnetB
+      SecurityGroups: [!ImportValue lore-network-AlbSecurityGroup]
+      LoadBalancerAttributes:
+        - { Key: idle_timeout.timeout_seconds, Value: "300" } # investigations stream for minutes (SSE)
+      Tags:
+        - { Key: Name, Value: lore-alb }
+        - { Key: project, Value: lore }
+
+  # The list of "places to send traffic": here, the API container on port 8000.
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: lore-api-tg
+      VpcId: !ImportValue lore-network-VpcId
+      Protocol: HTTP
+      Port: 8000
+      TargetType: ip # Fargate tasks are registered by IP address
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "10" }
+      Tags:
+        - { Key: Name, Value: lore-api-tg }
+        - { Key: project, Value: lore }
+
+  # Anything that does not carry the secret header gets "403 Forbidden".
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "403"
+            ContentType: text/plain
+            MessageBody: Forbidden
+
+  # ...except requests whose X-Origin-Verify header equals our secret: those go to the API.
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 1
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Origin-Verify
+            Values: [!Ref OriginVerifySecret]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ---------------------------------------------------------------- service
+  # Keeps exactly one task running. Never two: the run registry lives in memory, and two FalkorDB
+  # processes must never share one EFS folder. So a deploy stops the old task before starting the new one.
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: [ListenerRule, MountTargetA, MountTargetB]
+    Properties:
+      ServiceName: lore-api
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true } # a bad image rolls back by itself
+      HealthCheckGracePeriodSeconds: 180 # FalkorDB starts and, on first boot, the data loads
+      EnableExecuteCommand: true
+      PropagateTags: SERVICE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED # there is no NAT: the public IP is how the task reaches Gemini, Slack and GitHub
+          Subnets:
+            - !ImportValue lore-network-PublicSubnetA
+            - !ImportValue lore-network-PublicSubnetB
+          SecurityGroups: [!ImportValue lore-network-TaskSecurityGroup]
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8000
+          TargetGroupArn: !Ref TargetGroup
+      Tags:
+        - { Key: Name, Value: lore-api }
+        - { Key: project, Value: lore }
+
+Outputs:
+  AlbDnsName:
+    Value: !GetAtt LoadBalancer.DNSName
+    Export: { Name: lore-app-AlbDnsName }
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !GetAtt Service.Name
+  TargetGroupArn:
+    Value: !Ref TargetGroup

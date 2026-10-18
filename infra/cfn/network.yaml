@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lore network: one VPC, two public subnets, an internet gateway (no NAT) and three security groups.
+  Other stacks read the ids through Fn::ImportValue.
+
+Parameters:
+  CloudFrontPrefixListId:
+    Type: String
+    Default: pl-9aa247f3
+    Description: >-
+      AWS-managed prefix list "com.amazonaws.global.cloudfront.origin-facing" (the IP ranges CloudFront
+      uses to call our load balancer). deploy.sh looks it up for ap-south-1; this default is what it
+      returned on Oct 18 2026.
+
+Resources:
+  # Our own private network, separate from the account's default VPC.
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Name, Value: lore-vpc }
+        - { Key: project, Value: lore }
+
+  # The internet gateway lets the load balancer receive traffic, and lets the task call Gemini,
+  # Slack and GitHub. We use public subnets and no NAT gateway, which saves about $1 a day.
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: lore-igw }
+        - { Key: project, Value: lore }
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # An ALB must span at least two availability zones, so there are two subnets.
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.20.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: lore-public-a }
+        - { Key: project, Value: lore }
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.20.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: lore-public-b }
+        - { Key: project, Value: lore }
+
+  # Route table: "everything that is not inside the VPC goes to the internet gateway".
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: lore-public-rt }
+        - { Key: project, Value: lore }
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # Load balancer firewall: port 80 only from CloudFront's IP ranges (one rule, because the prefix
+  # list counts as about 55 of the 60 rules a security group may hold).
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: lore-alb-sg
+      GroupDescription: Lore ALB, HTTP 80 from CloudFront only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontPrefixListId
+          Description: CloudFront origin-facing IPs
+      Tags:
+        - { Key: Name, Value: lore-alb-sg }
+        - { Key: project, Value: lore }
+
+  # Task firewall: the API port 8000 only from the load balancer. FalkorDB's port 6379 is never
+  # opened, because both containers share the task's localhost.
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: lore-task-sg
+      GroupDescription: Lore ECS task, port 8000 from the ALB only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: API port from the ALB
+      Tags:
+        - { Key: Name, Value: lore-task-sg }
+        - { Key: project, Value: lore }
+
+  # File system firewall: NFS (2049) only from the task.
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: lore-efs-sg
+      GroupDescription: Lore EFS, NFS 2049 from the task only
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+          Description: NFS from the ECS task
+      Tags:
+        - { Key: Name, Value: lore-efs-sg }
+        - { Key: project, Value: lore }
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+    Export: { Name: lore-network-VpcId }
+  PublicSubnetAId:
+    Value: !Ref PublicSubnetA
+    Export: { Name: lore-network-PublicSubnetA }
+  PublicSubnetBId:
+    Value: !Ref PublicSubnetB
+    Export: { Name: lore-network-PublicSubnetB }
+  AlbSecurityGroupId:
+    Value: !Ref AlbSecurityGroup
+    Export: { Name: lore-network-AlbSecurityGroup }
+  TaskSecurityGroupId:
+    Value: !Ref TaskSecurityGroup
+    Export: { Name: lore-network-TaskSecurityGroup }
+  EfsSecurityGroupId:
+    Value: !Ref EfsSecurityGroup
+    Export: { Name: lore-network-EfsSecurityGroup }

@@ -1,32 +1,40 @@
-# Lore: Docker Compose
+# Lore: Docker Compose (local use). The AWS deployment is described in infra/ instead.
 #
-# Local:  docker compose up -d falkordb        (just the database, run the API with `make api`)
-#         docker compose up -d --build         (database + API in containers)
-# On the VM: docker compose --profile prod up -d --build   (adds Caddy for HTTPS)
+#   docker compose up -d falkordb        just the database (run the API with `make api`)
+#   docker compose up -d --build         database + API in containers
 #
-# SECURITY: on the VM, FalkorDB (6379) and FalkorDB Browser (3000) must NEVER be reachable from the
-# public internet. FalkorDB has no login by default, and the Browser lets anyone run queries.
-# That is why every published port below is bound to 127.0.0.1 (this machine only).
-# Containers talk to each other over the private compose network, so they do not need published ports.
-# Also set a FalkorDB password on the VM (see the REDIS_ARGS note under `falkordb`).
+# SECURITY: every published port is bound to 127.0.0.1 (this machine only). FalkorDB (Redis) must never
+# be reachable from the public internet. Containers talk to each other over the private compose network.
 
 services:
   falkordb:
-    image: falkordb/falkordb:latest # includes the FalkorDB Browser UI on port 3000
+    # The "-server" image: the same engine as falkordb/falkordb but without the Browser UI. It is also
+    # exactly what runs on AWS (infra/cfn/app.yaml), pinned to the same version.
+    image: falkordb/falkordb-server:v4.18.3
     container_name: lore-falkordb
     restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379" # database (Redis protocol)
-      - "127.0.0.1:3000:3000" # FalkorDB Browser (open http://localhost:3000)
     volumes:
       - falkordb_data:/var/lib/falkordb/data # keeps the graph when the container restarts
-    # Password for the VM: uncomment, then put the SAME password in .env as LORE_FALKORDB_PASSWORD.
-    # environment:
-    #   REDIS_ARGS: "--requirepass CHANGE_ME_LONG_RANDOM"
+    environment:
+      # Optional locally: put LORE_FALKORDB_PASSWORD in .env and both this service and the api use it.
+      FALKORDB_PASSWORD: ${LORE_FALKORDB_PASSWORD:-}
+      # Replaces the image's "TIMEOUT 1000" (1 s cap per query): 2 s default, 30 s ceiling (the loader's limit).
+      FALKORDB_ARGS: MAX_QUEUED_QUERIES 25 TIMEOUT_DEFAULT 2000 TIMEOUT_MAX 30000 RESULTSET_SIZE 10000
+    # The image's start script (run.sh) ignores command-line arguments and builds the redis-server command
+    # from $REDIS_ARGS, so the password and the journal setting go in there (same as on AWS).
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ -n "$$FALKORDB_PASSWORD" ]; then
+          export REDIS_ARGS="--requirepass $$FALKORDB_PASSWORD --appendonly yes"
+        else
+          export REDIS_ARGS="--appendonly yes"
+        fi
+        exec /var/lib/falkordb/bin/run.sh
     healthcheck:
-      # With a password set, `redis-cli ping` replies "NOAUTH" but still exits 0, so this only
-      # proves the server is up. That is enough for depends_on.
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$FALKORDB_PASSWORD" redis-cli ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -47,30 +55,9 @@ services:
       falkordb:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8000:8000" # API for local use; in prod Caddy talks to api:8000 directly
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend/replays:/app/replays # recorded runs for replay mode survive rebuilds
 
-  caddy:
-    image: caddy:2
-    container_name: lore-caddy
-    restart: unless-stopped
-    profiles: ["prod"] # only starts with: docker compose --profile prod up -d
-    depends_on:
-      - api
-    environment:
-      # Your domain, e.g. lore.example.com. Its DNS A record must point at the VM first,
-      # otherwise Caddy cannot get an HTTPS certificate.
-      LORE_DOMAIN: ${LORE_DOMAIN:-localhost}
-    ports:
-      - "80:80" # needed for the HTTPS certificate challenge and redirect
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data # certificates (keep this, or you will hit Let's Encrypt rate limits)
-      - caddy_config:/config
-
 volumes:
   falkordb_data:
-  caddy_data:
-  caddy_config:

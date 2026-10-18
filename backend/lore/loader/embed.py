@@ -55,16 +55,23 @@ def embed_texts(
     out: list[list[float]] = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i : i + BATCH_SIZE]
+        # One Content per text. gemini-embedding-2 is multimodal: a plain list of strings is
+        # read as ONE input and returns a single combined vector (FIX_LOG F-02).
+        contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in batch]
         for attempt in range(3):  # a few retries for rate limits
             try:
                 response = client.models.embed_content(
-                    model=settings.model_embed, contents=batch, config=config
+                    model=settings.model_embed, contents=contents, config=config
                 )
                 break
             except Exception:
                 if attempt == 2:
                     raise
                 time.sleep(2**attempt)
+        if len(response.embeddings) != len(batch):
+            raise RuntimeError(
+                f"asked for {len(batch)} embeddings, got {len(response.embeddings)}"
+            )
         # Gemini does not scale shortened vectors to length 1, so do it here
         out.extend(_normalise(list(e.values)) for e in response.embeddings)
     return out

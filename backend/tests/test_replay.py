@@ -90,11 +90,22 @@ def test_find_replay_by_alert_and_persona(tmp_path):
     assert replay.find_replay("A-9999", "dana", s) is None
 
 
-def test_committed_sample_replay_is_valid_and_found_for_arjun():
-    path = replay.find_replay("A-3001", "arjun")
+def test_committed_sample_replay_is_valid_and_found_for_arjun(tmp_path):
+    # Only the sample in the folder: real recordings (story_a_arjun.jsonl) would win otherwise.
+    sample = replay.replay_dir() / "sample_story_a.replay.json"
+    (tmp_path / sample.name).write_text(sample.read_text())
+    path = replay.find_replay("A-3001", "arjun", settings_for(tmp_path))
     assert path is not None and path.name == "sample_story_a.replay.json"
     events = replay.load_events(path)
     types = [e.type for e in events]
     assert types[0] == "investigation_started" and types[-1] == "done"
     assert "report" in types and "action_proposed" in types
     assert [e.seq for e in events] == list(range(len(events)))
+
+
+def test_recorded_golden_runs_are_valid():
+    """The real recordings (Oct 18, live Gemini) are the fallback when Gemini is down."""
+    for path in sorted(replay.replay_dir().glob("story_*.jsonl")):
+        types = [e.type for e in replay.load_events(path)]
+        assert types[0] == "investigation_started" and types[-1] == "done", path.name
+        assert "report" in types, path.name

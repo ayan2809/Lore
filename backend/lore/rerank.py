@@ -47,6 +47,7 @@ def merge_duplicates(candidates: list[Candidate]) -> list[Candidate]:
             setattr(current, signal, max(getattr(current, signal), getattr(c, signal)))
         current.text = best_text_from.text or current.text or c.text
         current.chunk_id = best_text_from.chunk_id or current.chunk_id or c.chunk_id
+        current.related_ids = sorted(set(current.related_ids) | set(c.related_ids))
         for field in ("source", "title", "updated_at", "access_level", "label", "service"):
             if getattr(current, field) is None:
                 setattr(current, field, getattr(c, field))

@@ -89,11 +89,14 @@ def propose(
     return action
 
 
-def edit(action_id: str, text: str) -> Action:
+def edit(action_id: str, text: str, cited_ids: list[str] | None = None) -> Action:
+    """Change the text, and optionally drop citations (you can only remove, never add)."""
     action = get(action_id)
     if action.status in ("sent", "rejected", "approved"):
         raise ActionStateError(f"cannot edit an action that is {action.status}")
     action.text = text
+    if cited_ids is not None:
+        action.cited_ids = [c for c in action.cited_ids if c in set(cited_ids)]
     action.status = "proposed"  # an edited blocked/failed action can be tried again
     action.blocked_reason = None
     _save(action, _graph)
@@ -118,7 +121,7 @@ async def approve(
     if action.status not in ("proposed", "failed"):
         raise ActionStateError(f"cannot approve an action that is {action.status}")
 
-    if action.kind == "slack_post":
+    if action.kind in ("slack_post", "github_issue"):
         reason = await _audience_problem(action, graph)
         if reason:
             action.status = "blocked"
@@ -147,11 +150,16 @@ async def _audience_problem(action: Action, graph: GraphLike | None) -> str | No
     """Return a reason string if the post must be blocked, else None. Fails closed."""
     from lore import policy  # imported here so tests can monkeypatch lore.policy
 
-    channel_id = "channel:" + action.target.lstrip("#")
     try:
-        decision = await asyncio.to_thread(
-            policy.check_post_audience, graph, channel_id, action.cited_ids
-        )
+        if action.kind == "github_issue":
+            decision = await asyncio.to_thread(
+                policy.check_issue_citations, graph, action.cited_ids
+            )
+        else:
+            channel_id = "channel:" + action.target.lstrip("#")
+            decision = await asyncio.to_thread(
+                policy.check_post_audience, graph, channel_id, action.cited_ids
+            )
     except Exception as exc:
         return f"Policy check could not run ({type(exc).__name__}), so the post was not sent."
     return None if decision.allowed else (decision.reason or "Blocked by policy.")

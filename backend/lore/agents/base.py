@@ -136,7 +136,13 @@ async def generate(
 
 
 async def run_agent(
-    spec: AgentSpec, goal: str, ctx: ToolContext, llm: LLM, emit: Emit, blackboard: Blackboard
+    spec: AgentSpec,
+    goal: str,
+    ctx: ToolContext,
+    llm: LLM,
+    emit: Emit,
+    blackboard: Blackboard,
+    max_steps: int | None = None,  # tighter budget, e.g. when following a playbook
 ) -> AgentOutput:
     bb = blackboard
     await emit(bb.event("agent_started", spec.name, {"agent": spec.name, "goal": goal}))
@@ -146,7 +152,7 @@ async def run_agent(
     contents = [user_text(_opening_message(goal, prior))]
     results: list[ToolResult] = []
 
-    for _ in range(bb.settings.max_agent_steps):
+    for _ in range(min(max_steps or bb.settings.max_agent_steps, bb.settings.max_agent_steps)):
         resp = await generate(llm, bb, spec.model, spec.system_prompt, contents, tools=decls)
         if not resp.function_calls:
             break

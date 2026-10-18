@@ -1,15 +1,20 @@
 """API tests: no FalkorDB, no Gemini. A fake supervisor and fake graph replace both."""
 
+import shutil
 import sys
+import tempfile
 import types
+from pathlib import Path
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 import lore
 from lore import actions
 from lore.api import deps, runs
 from lore.api.main import create_app
+from lore.api.ratelimit import client_ip
 from lore.api.runs import RunRegistry
 from lore.config import Settings, get_settings
 from lore.db import QueryOutcome
@@ -45,8 +50,17 @@ def make_fake_supervisor(seen: list):
     return fake_supervisor
 
 
-def build_client(limit: int = 100):
-    settings = Settings(session_secret="test-secret", rate_limit_per_minute=limit, _env_file=None)
+SAMPLE_REPLAY = Path(__file__).resolve().parents[1] / "replays" / "sample_story_a.replay.json"
+
+
+def build_client(limit: int = 100, **settings_extra):
+    # Tests see only the hand-written sample, not the real recordings in backend/replays.
+    if "replay_dir" not in settings_extra:
+        tmp = Path(tempfile.mkdtemp())
+        shutil.copy(SAMPLE_REPLAY, tmp / SAMPLE_REPLAY.name)
+        settings_extra["replay_dir"] = str(tmp)
+    settings = Settings(session_secret="test-secret", rate_limit_per_minute=limit, _env_file=None,
+                        **settings_extra)
     app = create_app(settings)
     seen: list = []
     registry = RunRegistry(supervisor=make_fake_supervisor(seen), replay_speed=10_000)
@@ -81,6 +95,31 @@ def test_session_cookie_sets_and_reads_persona(api):
     login(client, "dana")
     assert "lore_session" in client.cookies
     assert client.get("/api/session").json()["persona"]["id"] == "dana"
+
+
+def session_cookie_header(client) -> str:
+    return client.post("/api/session", json={"persona": "dana"}).headers["set-cookie"].lower()
+
+
+def test_session_cookie_is_httponly_lax_and_not_secure_by_default(api):
+    client, _ = api
+    header = session_cookie_header(client)
+    assert "httponly" in header and "samesite=lax" in header
+    assert "secure" not in header
+
+
+def test_session_cookie_is_secure_when_configured():
+    client, _, _ = build_client(cookie_secure=True)
+    with client:
+        header = session_cookie_header(client)
+    assert "httponly" in header and "samesite=lax" in header and "secure" in header
+
+
+def test_cors_origins_no_longer_change_the_cookie_flags():
+    client, _, _ = build_client(cors_origins=["https://example.vercel.app"])
+    with client:
+        header = session_cookie_header(client)
+    assert "samesite=lax" in header and "secure" not in header
 
 
 def test_default_and_tampered_cookie_fall_back_to_default_persona(api):
@@ -238,6 +277,43 @@ def test_rate_limit_returns_429():
         ]
         assert statuses == [200, 200, 429]
         assert client.get("/api/health").status_code == 200  # other routes are not limited
+
+
+def make_request(headers: dict[str, str], peer: str | None = "10.20.1.5") -> Request:
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    return Request({"type": "http", "headers": raw, "client": (peer, 1234) if peer else None})
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({"CloudFront-Viewer-Address": "203.0.113.7:51234"}, "203.0.113.7"),
+        ({"CloudFront-Viewer-Address": "2001:db8::1:443"}, "2001:db8::1"),  # IPv6, no brackets
+        ({"CloudFront-Viewer-Address": "[2001:db8::1]:443"}, "2001:db8::1"),
+        # CloudFront wins over X-Forwarded-For, which is only a fallback
+        ({"CloudFront-Viewer-Address": "203.0.113.7:1", "X-Forwarded-For": "198.51.100.9"},
+         "203.0.113.7"),
+        ({"X-Forwarded-For": "198.51.100.9, 10.20.1.5"}, "198.51.100.9"),  # first entry
+        ({}, "10.20.1.5"),  # no proxy headers: the direct peer
+    ],
+)
+def test_client_ip(headers, expected):
+    assert client_ip(make_request(headers)) == expected
+
+
+def test_client_ip_without_any_information():
+    assert client_ip(make_request({}, peer=None)) == "unknown"
+
+
+def test_rate_limit_is_per_cloudfront_viewer_address():
+    client, _, _ = build_client(limit=1)
+    with client:
+        def post(viewer: str) -> int:
+            return client.post("/api/investigations", json={"alert_id": "A-3001"},
+                               headers={"CloudFront-Viewer-Address": viewer}).status_code
+
+        assert [post("203.0.113.7:1000"), post("203.0.113.7:2000")] == [200, 429]  # same IP
+        assert post("203.0.113.8:1000") == 200  # another visitor has their own budget
 
 
 def test_supervisor_crash_ends_stream_with_error_then_done():

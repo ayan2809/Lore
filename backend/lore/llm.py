@@ -167,11 +167,16 @@ class GeminiLLM:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), 100):  # the API takes at most 100 texts per call
             batch = texts[start : start + 100]
+            # One Content per text: gemini-embedding-2 merges a plain list of strings into a
+            # single embedding (FIX_LOG F-02).
+            contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in batch]
             resp = await self._with_retry(
-                lambda b=batch: self.client.aio.models.embed_content(
-                    model=self.settings.model_embed, contents=b, config=config
+                lambda c=contents: self.client.aio.models.embed_content(
+                    model=self.settings.model_embed, contents=c, config=config
                 )
             )
+            if len(resp.embeddings) != len(batch):
+                raise RuntimeError(f"asked for {len(batch)} embeddings, got {len(resp.embeddings)}")
             vectors.extend(list(e.values) for e in resp.embeddings)
         return vectors
 
@@ -191,10 +196,14 @@ class GeminiLLM:
 
 
 def _safe_text(resp: Any) -> str:
+    """Join the text parts ourselves: `resp.text` warns on every reply that also holds a
+    function call, which flooded the logs during live runs."""
     try:
-        return resp.text or ""
-    except Exception:  # .text can raise when the reply has only non-text parts
+        parts = resp.candidates[0].content.parts or []
+    except (AttributeError, IndexError, TypeError):
         return ""
+    texts = [p.text for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False)]
+    return "".join(texts)
 
 
 def _parse(resp: Any, schema: type[BaseModel] | None) -> Any:

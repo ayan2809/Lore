@@ -1,0 +1,7 @@
+timestamp,mode,cases,recall_at_5,retrieval_forbidden,must_include,cited,refusal_ok,generation_forbidden,root_cause_ok,leaks,llm
+2026-10-18 12:51,graph,59,0.2574,0,,,,,,0,gemini-3.8-flash
+2026-10-18 12:51,vector,59,0.3796,0,,,,,,0,gemini-3.8-flash
+2026-10-18 12:57,graph,59,,,0.7444,0.6949,0.9492,0,,0,gemini-3.8-flash
+2026-10-18 12:57,vector,59,,,0.4444,0.5085,0.678,0,,0,gemini-3.8-flash
+2026-10-18 13:02,graph,59,0.7507,0,,,,,,0,gemini-3.8-flash
+2026-10-18 13:02,vector,59,0.3796,0,,,,,,0,gemini-3.8-flash

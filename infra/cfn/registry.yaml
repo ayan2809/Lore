@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lore registry: the ECR repository for the API image, an S3 bucket plus a CodeBuild project that
+  builds the image on ARM64 (so no Docker is needed on the Mac), and the two Secrets Manager secrets.
+  Exports are read by the app stack through Fn::ImportValue.
+
+Resources:
+  # Where the API image lives. Scan on push; only the last 5 images are kept, to stay inside the free tier.
+  ApiRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: lore-api
+      ImageTagMutability: MUTABLE # ":latest" moves; the ":<git-sha>" tags are what we deploy and roll back to
+      EmptyOnDelete: true # lets "deploy.sh destroy" delete the stack even when images are left
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"keep the last 5 images",
+          "selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},
+          "action":{"type":"expire"}}]}
+      Tags:
+        - { Key: Name, Value: lore-api }
+        - { Key: project, Value: lore }
+
+  # deploy.sh uploads backend.zip here, and CodeBuild reads it. Private; objects expire after 7 days.
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub lore-artifacts-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-after-7-days
+            Status: Enabled
+            ExpirationInDays: 7
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - { Key: Name, Value: !Sub "lore-artifacts-${AWS::AccountId}" }
+        - { Key: project, Value: lore }
+
+  # CodeBuild's log output; created here so it can have a short retention (CodeBuild would make one that never expires).
+  BuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/codebuild/lore-api-build
+      RetentionInDays: 3
+
+  # The identity CodeBuild runs as. It can only read the zip, push to lore-api and write its own logs.
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lore-codebuild-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: lore-codebuild-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteOwnLogs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${BuildLogGroup.Arn}:*"
+              - Sid: ReadSourceZip
+                Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion]
+                Resource: !Sub "${ArtifactsBucket.Arn}/*"
+              - Sid: FindSourceBucket
+                Effect: Allow
+                Action: s3:GetBucketLocation
+                Resource: !GetAtt ArtifactsBucket.Arn
+              - Sid: EcrLogin
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*" # this one action cannot be limited to a repository
+              - Sid: PushOnlyToLoreApi
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !GetAtt ApiRepository.Arn
+      Tags:
+        - { Key: Name, Value: lore-codebuild-role }
+        - { Key: project, Value: lore }
+
+  # Builds the API image on a native ARM64 machine (Fargate here runs ARM64 too), then pushes it.
+  # The build steps are in infra/buildspec.yml, which deploy.sh puts inside the zip.
+  ApiBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: lore-api-build
+      Description: Builds the Lore API image (ARM64) and pushes it to ECR
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      TimeoutInMinutes: 20
+      Source:
+        Type: S3
+        Location: !Sub "${ArtifactsBucket}/backend.zip"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:3.0
+        PrivilegedMode: true # needed to run Docker inside the build
+        EnvironmentVariables:
+          - { Name: REPO_URI, Type: PLAINTEXT, Value: !GetAtt ApiRepository.RepositoryUri }
+          - { Name: IMAGE_TAG, Type: PLAINTEXT, Value: manual } # deploy.sh overrides this with the git sha
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref BuildLogGroup
+      Tags:
+        - { Key: Name, Value: lore-api-build }
+        - { Key: project, Value: lore }
+
+  # Every app secret in one JSON secret. CloudFormation writes these placeholders only when it
+  # CREATES the secret; later stack updates leave the real values (put there by "deploy.sh secrets") alone.
+  AppSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: lore/app
+      Description: Lore API keys and passwords (replace the CHANGE_ME values with deploy.sh secrets)
+      SecretString: >-
+        {"LORE_GEMINI_API_KEY":"CHANGE_ME","LORE_SLACK_WEBHOOK_URL":"CHANGE_ME",
+        "LORE_GITHUB_TOKEN":"CHANGE_ME","LORE_SESSION_SECRET":"CHANGE_ME",
+        "LORE_FALKORDB_PASSWORD":"CHANGE_ME"}
+      Tags:
+        - { Key: project, Value: lore }
+
+  # The secret header value that proves a request came through our CloudFront (CloudFront sends it, the
+  # ALB checks it). CloudFormation generates it, so it is never in git. deploy.sh reads it from here
+  # (the deployer policy allows Secrets Manager on lore/*, but not SSM Parameter Store).
+  OriginVerifySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: lore/origin-verify
+      Description: Shared secret between CloudFront and the ALB (header X-Origin-Verify)
+      GenerateSecretString:
+        SecretStringTemplate: "{}"
+        GenerateStringKey: ORIGIN_VERIFY
+        PasswordLength: 40
+        ExcludePunctuation: true # letters and digits only: safe in a header and in an ALB rule
+      Tags:
+        - { Key: project, Value: lore }
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt ApiRepository.RepositoryUri
+    Export: { Name: lore-registry-RepositoryUri }
+  RepositoryArn:
+    Value: !GetAtt ApiRepository.Arn
+    Export: { Name: lore-registry-RepositoryArn }
+  ArtifactsBucketName:
+    Value: !Ref ArtifactsBucket
+    Export: { Name: lore-registry-ArtifactsBucket }
+  AppSecretArn:
+    Value: !Ref AppSecret
+    Export: { Name: lore-registry-AppSecretArn }
+  BuildProjectName:
+    Value: !Ref ApiBuildProject

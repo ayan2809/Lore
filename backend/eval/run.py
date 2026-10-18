@@ -65,22 +65,26 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- the three layers
 
 
-async def retrieve(ctx, llm, question: str, mode: str) -> list[str]:
-    """Search + rerank, returning ranked SOURCE ids. No answer is written."""
-    from lore import rerank, retrieval
+async def retrieve(ctx, llm, question: str, mode: str) -> tuple[list[str], list[str]]:
+    """The product's own Ask retrieval + rerank (ask._retrieve), no answer written.
+
+    Returns (ids in the top 5 sources, ids in the top 20 sources). A graph-facts source counts
+    the related ids its text names too ("pr:482 was AUTHORED by person:priya"), because those are
+    in the context the model reads. Graph OFF = vector search ranked by similarity only.
+    """
+    from lore import ask, rerank
 
     qvec = (await llm.embed([question], "query"))[0]
-    found = retrieval.vector_search(ctx, qvec, k=RETRIEVE_LIMIT)
-    if mode == "vector":  # Graph OFF: similarity only
+    found = await ask._retrieve(ctx, question, qvec, mode)
+    weights = None
+    if mode == "vector":
         weights = {"meaning": 1.0, "keyword": 0.0, "graph": 0.0, "recency": 0.0}
-        ranked = rerank.rerank(found, EVAL_NOW, weights)
-    else:
-        found += retrieval.fulltext_search(ctx, question, k=RETRIEVE_LIMIT)
-        service = next((c.service for c in found if c.service), None)  # topic = best hit's service
-        if service:
-            found += retrieval.graph_scoped_search(ctx, service, qvec, k=RETRIEVE_LIMIT)
-        ranked = rerank.rerank(found, EVAL_NOW)
-    return [c.id for c in ranked[:RETRIEVE_LIMIT]]
+    ranked = rerank.rerank(found, EVAL_NOW, weights) if weights else rerank.rerank(found, EVAL_NOW)
+
+    def flat(cands):
+        return list(dict.fromkeys(i for c in cands for i in (c.id, *c.related_ids)))
+
+    return flat(ranked[:5]), flat(ranked[:RETRIEVE_LIMIT])
 
 
 def make_ctx(graph, persona: str, mode: str):
@@ -94,8 +98,10 @@ async def run_retrieval(cases, graph, llm, mode) -> list[dict[str, Any]]:
     rows = []
     for case in cases:
         ctx = make_ctx(graph, case["persona"], mode)
-        ids = await retrieve(ctx, llm, case["question"], mode)
-        rows.append({**sc.score_retrieval(case, ids), "returned": ids[:5]})
+        top5, top20 = await retrieve(ctx, llm, case["question"], mode)
+        row = sc.score_retrieval(case, top5, k=len(top5) or 5)
+        row["forbidden"] = sc.score_retrieval(case, top20, k=len(top20) or 5)["forbidden"]
+        rows.append({**row, "returned": top5[:12]})
     return rows
 
 
@@ -130,7 +136,7 @@ async def run_leak_check(golden, graph, llm) -> list[dict[str, Any]]:
         ctx = make_ctx(graph, persona, "graph")
         leaks: set[str] = set()
         for question in probes:
-            ids = await retrieve(ctx, llm, question, "graph")
+            _, ids = await retrieve(ctx, llm, question, "graph")  # top 20, incl. graph facts
             leaks |= set(sc.forbidden_hits(ids, sc.FORBIDDEN_BY_PERSONA[persona]))
         rows.append({"persona": persona, "probes": len(probes), "leaks": sorted(leaks)})
     return rows

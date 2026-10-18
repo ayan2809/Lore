@@ -4,7 +4,8 @@ from lore.observability import RunMetrics, Timer, estimate_cost, log_event
 
 
 def test_estimate_cost_uses_price_table_and_defaults_for_unknown_models():
-    assert estimate_cost("gemini-3-flash-preview", 1_000_000, 0) == 0.5
+    assert estimate_cost("gemini-3.8-flash", 1_000_000, 0) == 0.75
+    assert estimate_cost("gemini-3.5-flash-lite", 0, 1_000_000) == 2.5
     assert estimate_cost("some-new-model", 0, 1_000_000) == 12.0
 
 

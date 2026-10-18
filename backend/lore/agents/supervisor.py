@@ -72,8 +72,8 @@ async def run_investigation(
     describe = f"Alert {alert_id} fired on {service} (at unix time {ctx.now_ts}): {symptom}."
     all_results: list[ToolResult] = []
 
-    async def run(spec: AgentSpec, goal: str) -> AgentOutput:
-        out = await _run_safely(spec, goal, ctx, llm, emit, bb)
+    async def run(spec: AgentSpec, goal: str, max_steps: int | None = None) -> AgentOutput:
+        out = await _run_safely(spec, goal, ctx, llm, emit, bb, max_steps)
         all_results.extend(out.tool_results)
         return out
 
@@ -97,9 +97,12 @@ async def run_investigation(
         await bb.remember(memory.mark_playbook_used, inv_id, playbook["id"])
         goal += (
             f" A playbook learned from a confirmed past investigation ({playbook['id']}) says "
-            f"to run these tools first, in this order: {', '.join(playbook['steps'])}."
+            f"to run these tools, once each, in this order: {', '.join(playbook['steps'])}. "
+            "Then answer: do not explore further unless a step fails."
         )
-    inv_out = await run(investigator.spec(settings), goal)
+    # Fast path (FIX_LOG F-11): a confirmed playbook caps the Investigator at its steps + 1 turn.
+    budget = len(playbook["steps"]) + 1 if playbook else None
+    inv_out = await run(investigator.spec(settings), goal, budget)
     if inv_out.root_cause:
         bb.metrics.root_cause_found()
     if inv_out.confidence < settings.investigator_confidence_threshold:
@@ -114,15 +117,27 @@ async def run_investigation(
         if retry.confidence > inv_out.confidence:
             inv_out = retry
 
-    # 5. Responder: people to contact + proposed actions (a human approves them later).
+    # 5. Who to contact is a fact, so code decides it from the root cause (FIX_LOG F-03).
+    people = await _people_by_rule(inv_out.root_cause, ctx, emit, bb, all_results)
+
+    # 6. Responder: proposed actions (a human approves them later).
+    if people:
+        who = (
+            f"People, decided by rule: page {people.page}; consult {', '.join(people.consult)}; "
+            f"notify {', '.join(people.notify) or 'nobody'}. Use exactly these people."
+        )
+    else:
+        who = "Decide who to page, consult and notify."
     await run(
         responder.spec(settings),
-        f"{describe} Root cause: {inv_out.root_cause or 'not confirmed'}. Decide who to page, "
-        "consult and notify, and propose the Slack post and the GitHub issue.",
+        f"{describe} Root cause: {inv_out.root_cause or 'not confirmed'}. {who} "
+        "Propose the Slack post and the GitHub issue.",
     )
 
-    # 6. The final report: written by the model, checked by code.
+    # 7. The final report: written by the model, checked by code.
     report = await _write_report(describe, severity, inv_out, ctx, llm, emit, bb, all_results)
+    if people:
+        report.people = people
     await emit(bb.event("report", None, report.model_dump()))
     await bb.remember(memory.finish_investigation, inv_id, "done", report.root_cause)
 
@@ -147,11 +162,17 @@ async def _alert_context(ctx: ToolContext, alert_id: str) -> dict[str, Any]:
 
 
 async def _run_safely(
-    spec: AgentSpec, goal: str, ctx: ToolContext, llm: LLM, emit: Emit, bb: Blackboard
+    spec: AgentSpec,
+    goal: str,
+    ctx: ToolContext,
+    llm: LLM,
+    emit: Emit,
+    bb: Blackboard,
+    max_steps: int | None = None,
 ) -> AgentOutput:
     """One agent failing (quota, timeout, a bug) must not end the investigation."""
     try:
-        return await run_agent(spec, goal, ctx, llm, emit, bb)
+        return await run_agent(spec, goal, ctx, llm, emit, bb, max_steps)
     except Exception as exc:
         log_event(event="agent_failed", agent=spec.name, error=f"{type(exc).__name__}: {exc}")
         await _error(emit, bb, spec.name, f"{spec.name} failed: {type(exc).__name__}")
@@ -185,6 +206,54 @@ async def _severity(
         all_results.append(result)
         rows = result.data if not result.error else None
     return policy.severity_for(rows) if rows else None
+
+
+async def _people_by_rule(
+    root_cause: str | None,
+    ctx: ToolContext,
+    emit: Emit,
+    bb: Blackboard,
+    all_results: list[ToolResult],
+) -> PeopleToContact | None:
+    """Page the owner of the service the root-cause change was deployed to, consult its top
+    hands-on experts, notify the change's author. Returns None if the root cause is not a
+    deployed PR (then the Responder decides, and the report keeps only ids tools returned)."""
+    change = next(
+        (
+            row
+            for r in all_results
+            if r.tool == "recent_changes" and not r.error
+            for row in r.data
+            if root_cause and row.get("pr_id") == root_cause
+        ),
+        None,
+    )
+    if not change or not change.get("service_id"):
+        return None
+    service = change["service_id"]
+    known = next(
+        (r for r in reversed(all_results) if r.tool == "who_knows" and service in r.node_ids),
+        None,
+    )
+    if known is None or known.error:
+        known = await run_tool(
+            "supervisor",
+            "who_knows",
+            {"reason": f"Pick who to contact for {service}, where the root cause landed.",
+             "service": service},
+            ctx,
+            emit,
+            bb,
+        )
+        all_results.append(known)
+    if known.error:
+        return None
+    author = change.get("author_id")
+    page = next((p["id"] for p in known.data if p.get("role") == "page"), None)
+    consult = [
+        p["id"] for p in known.data if p.get("role") == "consult" and p["id"] not in (page, author)
+    ][:2]
+    return PeopleToContact(page=page, consult=consult, notify=[author] if author else [])
 
 
 def _last_rows(results: list[ToolResult], tool: str) -> list[dict[str, Any]] | None:

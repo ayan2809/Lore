@@ -19,11 +19,11 @@ Stop: `Ctrl+C` in the API and web terminals, then `make down` (stops the databas
 
 **No Docker on this machine?** Use `make db-lite` instead of `make db`. It runs the real FalkorDB module through FalkorDBLite on port 6390 (data in `.falkordb-lite/`, no Browser UI). Put `LORE_FALKORDB_PORT=6390` in `.env`. Stop it with `Ctrl+C`.
 
-Everything in containers (what the VM runs): `docker compose --profile prod up -d --build`. Stop with `docker compose --profile prod down`. Check with `docker compose ps` and `docker compose logs -f api`.
+Everything in containers locally: `docker compose up -d --build` (database + API). Stop with `docker compose down`. Check with `docker compose ps` and `docker compose logs -f api`. The AWS deployment is separate (section 8).
 
 Quick health check: `curl http://localhost:8000/api/health` should return `falkordb: true`.
 
-FalkorDB Browser (to look at the graph and run Cypher by hand): http://localhost:3000.
+Looking at the graph by hand: the compose image (`falkordb/falkordb-server`, the same one AWS runs) has no Browser UI. Use `redis-cli -p 6379 GRAPH.RO_QUERY org_kettle "MATCH (n) RETURN count(n)"`, or, if you want the Browser for a screenshot, run it separately: `docker run -p 3000:3000 -p 6380:6379 falkordb/falkordb` and load into port 6380.
 
 ## 2. Reset and reload the graph
 
@@ -51,13 +51,19 @@ make load   # put the result into the graph
 
 ## 4. Rotate keys
 
-| Secret | Where it lives | How to rotate |
-|---|---|---|
-| Gemini key | `LORE_GEMINI_API_KEY` in `.env` | Create a new key in Google AI Studio, put it in `.env`, restart the API (`docker compose up -d api` on the VM, which recreates the container with the new env), delete the old key in AI Studio. |
-| Slack webhook | `LORE_SLACK_WEBHOOK_URL` | Create a new incoming webhook in the Slack app settings, replace it, restart the API, delete the old webhook. |
-| GitHub token | `LORE_GITHUB_TOKEN` | Make a new fine-grained token limited to the demo repo with "Issues: write", replace it, restart, revoke the old token. |
-| Session secret | `LORE_SESSION_SECRET` | `openssl rand -hex 32`, replace, restart. Everyone is logged out (they just pick a persona again). |
-| FalkorDB password | `LORE_FALKORDB_PASSWORD` in `.env` and `REDIS_ARGS` in `docker-compose.yml` | Change both to the same new value, then `docker compose up -d falkordb api`. |
+Locally the keys are in `.env`. On AWS they are in one Secrets Manager secret, `lore/app` (section 8.2).
+
+| Secret | Locally | On AWS | How to get a new one |
+|---|---|---|---|
+| Gemini key | `LORE_GEMINI_API_KEY` in `.env` | key in `lore/app` | Create a new key in Google AI Studio, store it, restart, delete the old key in AI Studio. |
+| Slack webhook | `LORE_SLACK_WEBHOOK_URL` | key in `lore/app` | Create a new incoming webhook in the Slack app settings, store it, restart, delete the old webhook. |
+| GitHub token | `LORE_GITHUB_TOKEN` | key in `lore/app` | Make a new fine-grained token limited to the demo repo with "Issues: write", store it, restart, revoke the old one. |
+| Session secret | `LORE_SESSION_SECRET` | key in `lore/app` (generated) | `openssl rand -hex 32`. Everyone is logged out (they just pick a persona again). |
+| FalkorDB password | `LORE_FALKORDB_PASSWORD` in `.env` (optional) | key in `lore/app` (generated) | See the warning below. |
+
+On AWS: `make aws-secrets` (hidden prompts; Enter keeps a stored value; the generated ones are kept too), then `infra/deploy.sh restart` so the running task picks the new values up. To rotate the two generated values (session secret and FalkorDB password) as well, run `infra/deploy.sh secrets --regenerate` (add `--from-env` to read the other three from `.env`).
+
+**Rotating the FalkorDB password on AWS:** the password is applied when the FalkorDB container starts, and the data on EFS does not store it, so a restart with a new value simply works. Both containers read the same key, so they change together.
 
 If a key was ever committed to git, treat it as leaked: rotate it first, then clean the history.
 
@@ -66,7 +72,7 @@ If a key was ever committed to git, treat it as leaked: rotate it first, then cl
 Replay mode plays back a recorded run instead of calling Gemini. The UI labels it clearly as a replay.
 
 1. In `.env` set `LORE_FORCE_REPLAY=true`.
-2. Restart the API (`docker compose up -d api` on the VM, or restart `make api`).
+2. Restart the API (locally `make api`; on AWS change the setting and run `infra/deploy.sh restart`, see section 8.5).
 3. Check `curl .../api/health` shows `replay: true`.
 
 Recorded runs are `*.jsonl` files in `backend/replays/` (git-ignored except samples). Record new ones while Gemini works, by running an investigation normally with recording turned on (TODO: confirm the exact switch once `lore/replay.py` is written, and update this line). Set `LORE_FORCE_REPLAY=false` to go back to live runs.
@@ -93,62 +99,114 @@ make eval       # golden questions, Graph ON and OFF, writes backend/eval/report
 
 `report.md` is git-ignored. Copy the numbers into the README results table by hand (never type a number that is not in the report), and commit the report file deliberately if you want it in the repo (`git add -f`). Evals must always run against a freshly loaded graph (`make load` first), otherwise memory from earlier runs changes the results.
 
-## 8. Deploy
+## 8. Deploy to AWS
 
-### 8.1 Backend on a VM (Docker Compose + Caddy)
+Everything runs through `infra/deploy.sh` (or the `make aws-*` shortcuts). Region `ap-south-1`, account and user as in `infra/iam/lore-deployer-policy.json`. The architecture, the cost and the reasons for each choice are in `docs/INFRA_PLAN.md` and `infra/README.md`. Nothing here needs Docker on your Mac: the image is built in AWS.
 
-One-time setup (TODO(Ayan): choose a provider and host, any small Linux VM with 2 GB RAM or more is enough):
+### 8.1 First deploy
 
-1. Create the VM (Ubuntu). Note its IP address.
-2. Install Docker Engine and the compose plugin (follow the official Docker docs for Ubuntu). Check `docker compose version`.
-3. Firewall: allow only ports 22, 80 and 443 from the internet. Do NOT open 6379 or 3000.
-4. DNS: create an `A` record for your domain (for example `lore.example.com`) pointing at the VM IP. Wait until it resolves.
-5. Create `.env` on the VM (from `.env.example`) with at least:
-   - `LORE_DOMAIN=lore.example.com`
-   - `LORE_GEMINI_API_KEY=...`
-   - `LORE_SESSION_SECRET=` a long random value
-   - `LORE_FALKORDB_PASSWORD=` a long random value, and the same value in `docker-compose.yml` under `falkordb` -> `environment` -> `REDIS_ARGS: "--requirepass <value>"` (uncomment that block)
-   - `LORE_CORS_ORIGINS='["https://<your-vercel-url>"]'`
-   - Slack and GitHub settings if you want real actions
-6. Copy the repo and start it. From your laptop: `VM_HOST=ubuntu@<ip> make deploy` (rsyncs the code and runs `docker compose --profile prod up -d --build`). Or do it by hand over ssh.
-7. Load the graph on the VM: `docker compose exec api python -m lore.loader.load --reset` (add `--fake-embeddings` to skip Gemini).
-8. Test: `curl https://lore.example.com/api/health`.
+```bash
+aws sts get-caller-identity            # check you are the deploying user (ayan-mac)
+make aws-deploy                        # network + registry stacks, then it STOPS: the secret is not filled yet
+make aws-secrets-from-env              # or: make aws-secrets
+make aws-deploy                        # image build, app stack, website; prints the public URL
+```
 
-Update later: run `make deploy` again. The graph survives because it is in the `falkordb_data` volume.
+After the second `make aws-deploy` finishes (30 to 45 minutes the first time), open the printed `https://dxxxx.cloudfront.net` URL. The API loads the Kettle data into the empty graph in the background on first boot; `make aws-logs` shows `load_on_start_progress` lines, and `/api/health` answers meanwhile (its `falkordb` flag stays `false` until the graph exists).
 
-Caddy gets and renews the HTTPS certificate by itself the first time the domain is requested. If it cannot (DNS not ready, port 80/443 blocked) see section 9.
+### 8.2 Secrets
 
-### 8.2 Frontend on Vercel
+The secret `lore/app` holds five keys: `LORE_GEMINI_API_KEY`, `LORE_SLACK_WEBHOOK_URL`, `LORE_GITHUB_TOKEN`, `LORE_SESSION_SECRET`, `LORE_FALKORDB_PASSWORD`. A second secret, `lore/origin-verify`, holds the CloudFront-to-ALB header value; CloudFormation generates it and `deploy.sh` reads it. CloudFormation creates `lore/app` with `CHANGE_ME` placeholders, and `deploy.sh` refuses to deploy the app until none are left.
 
-1. Import the GitHub repo in Vercel, set the Root Directory to `frontend`.
-2. Framework preset: Vite. Build command `npm run build`, output `dist` (the defaults).
-3. Environment variable: `VITE_API_BASE=https://lore.example.com` (no trailing slash). It is baked in at build time, so redeploy after changing it.
-4. Add the Vercel URL to `LORE_CORS_ORIGINS` on the VM and restart the API.
+| Command | What it does |
+|---|---|
+| `make aws-secrets` | Generates the session secret and the FalkorDB password (unless already set), and asks for the other three with hidden input. Enter keeps a stored value; Slack and GitHub may be left empty (those actions are then simulated). |
+| `make aws-secrets-from-env` | The same, but reads Gemini, Slack and GitHub from the repo-root `.env` (only those three lines are parsed; nothing is echoed). Asks for any that are missing. |
+
+The values go to AWS through a private temp file (mode 0600, deleted on exit). Never edit the secret in a way that puts a value in your shell history. If you prefer the console, sign in as `ayan-mac` (not root) and edit `lore/app` there; do not create it by hand before the stack exists.
+
+### 8.3 Check on it, logs, shell
+
+```bash
+make aws-status                        # stacks, task, load balancer target health, URL, /api/health
+make aws-logs                          # API logs (follows); make aws-logs CONTAINER=falkordb for the database
+infra/deploy.sh exec                   # shell in the api container (ECS Exec; needs the Session Manager plugin)
+infra/deploy.sh exec falkordb          # shell in the database container; try: redis-cli -a "$FALKORDB_PASSWORD" GRAPH.LIST
+```
+
+Logs are kept 3 days (`/lore/api`, `/lore/falkordb`, `/aws/codebuild/lore-api-build`). Each line from the API is one JSON object (`log_event`).
+
+### 8.4 Ship a change
+
+```bash
+git commit ...                         # the image tag is the git sha; uncommitted backend changes get a "-dirty-<time>" tag
+make aws-backend                       # zip backend/ -> S3 -> CodeBuild (ARM64) -> ECR -> redeploy the app stack
+make aws-frontend                      # npm ci + build (VITE_API_BASE empty) -> S3 -> invalidate /index.html
+```
+
+A backend deploy replaces the single task, so the API is down for about a minute. The graph stays on EFS. To try another Gemini model without code changes: `MODEL_PRO=gemini-4-argon infra/deploy.sh backend-only` (also `MODEL_FLASH`, `MODEL_EMBED`, `GITHUB_REPO`, `RATE_LIMIT_PER_MINUTE`; the stack remembers them until you override them again).
+
+### 8.5 Restart and rollback
+
+```bash
+infra/deploy.sh restart                # fresh task, same image (after changing a secret or a setting)
+infra/deploy.sh rollback               # lists the images in ECR (the last 5 are kept)
+infra/deploy.sh rollback <tag>         # redeploys the app stack with that image tag
+```
+
+A failed deployment also rolls itself back (ECS deployment circuit breaker).
+
+To switch to replay mode when Gemini is down, set `LORE_FORCE_REPLAY=true` for the task: add `{ Name: LORE_FORCE_REPLAY, Value: "true" }` to the `api` container's `Environment` in `infra/cfn/app.yaml` and run `make aws-backend`. Remove it afterwards.
+
+### 8.6 Tear down
+
+```bash
+make aws-destroy                       # type "lore" to confirm
+```
+
+It empties the buckets and ECR, deletes the four stacks in reverse order, and force-deletes both secrets so the names are free again. **It deletes the EFS disk, so the graph and all agent memory are lost** (a new deploy reloads the Kettle data). Costs stop. Confirm in the console that no `lore-*` stack, load balancer or CloudFront distribution is left.
 
 ## 9. Troubleshooting
 
-**FalkorDB not reachable** (`/api/health` shows `falkordb: false`, or "connection refused")
+**FalkorDB not reachable locally** (`/api/health` shows `falkordb: false`, or "connection refused")
 - Is the container up? `docker compose ps`, `docker compose logs falkordb`.
 - Docker Desktop not running (Mac)? Start it.
 - Running `make api` on the laptop: `LORE_FALKORDB_HOST` must be `localhost`. Inside the compose `api` container it is `falkordb` (compose sets this itself).
-- Password mismatch: if FalkorDB has `--requirepass`, `LORE_FALKORDB_PASSWORD` must match exactly. Errors mention "NOAUTH" or "invalid password".
+- Password mismatch: if FalkorDB has a password, `LORE_FALKORDB_PASSWORD` must match exactly. Errors mention "NOAUTH" or "invalid password".
 - Port 6379 already used by another Redis on your laptop: stop it, or change the left side of the port mapping.
 - Graph empty after a restart: check that the `falkordb_data` volume is mounted (`docker volume ls`). If it was wiped, run `make load`.
+- A brand-new database has no graph yet: `/api/health` shows `falkordb: false` until the first load (FalkorDB refuses to read a graph that does not exist).
 
-**Live steps do not stream (SSE buffering)**
-- Symptom: the trail stays empty and everything appears at once at the end.
-- Behind Caddy, `flush_interval -1` in the `Caddyfile` fixes it (already set). Do not add `encode gzip` to that site block.
-- Any other proxy or CDN in front (nginx, Cloudflare) can buffer too. For nginx use `proxy_buffering off;`. For Cloudflare turn the orange-cloud proxy off for the API record.
-- Test without the browser: `curl -N https://lore.example.com/api/investigations/<id>/events` should print events as they happen.
+**Live steps do not stream (SSE) on the CloudFront URL**
+- Symptom: the trail stays empty and everything appears at once at the end, or the stream cuts after about a minute.
+- CloudFront must not compress or cache `/api/*`: check the `/api/*` behaviour has `CachingDisabled` and `Compress: false` (`infra/cfn/frontend.yaml`). The API sends an SSE ping every 15 s; the CloudFront origin read timeout is 60 s and the ALB idle timeout is 300 s, so a gap longer than 60 s with no event would cut it.
+- Test without the browser: `curl -N https://dxxxx.cloudfront.net/api/investigations/<id>/events` should print events as they happen (start a run first with a session cookie).
+- Locally behind another proxy (nginx): `proxy_buffering off;`.
 
-**CORS errors or "not logged in" after a persona switch**
-- The browser blocks calls from the Vercel site to the API unless the API's domain allows it. Check that the exact Vercel origin (scheme + host, no trailing slash) is in `LORE_CORS_ORIGINS`.
-- Cookies across sites: when the frontend (`*.vercel.app`) and the API (`lore.example.com`) are on different domains, the session cookie `lore_session` is a third-party cookie. It is only sent if it was set with `SameSite=None; Secure`, and the frontend must make requests with credentials (`fetch(..., { credentials: "include" })`). The API must also answer with `Access-Control-Allow-Credentials: true` and a specific origin (not `*`). `Secure` needs HTTPS, so this cannot work over plain `http://` except on `localhost`.
-- If cookies still get blocked (some browsers block third-party cookies entirely), put both under one parent domain (for example `app.example.com` for the web page and `api.example.com` for the API) so the cookie is first-party.
-- TODO(Ayan): confirm in `backend/lore/api/` that the cookie is set with these attributes in production, then delete this line.
+**403 Forbidden from the load balancer** (body just says `Forbidden`)
+- Someone called the ALB without the secret header. Normal if you open the ALB address directly: use the CloudFront URL.
+- If the CloudFront URL itself returns 403 on `/api/...`, the `X-Origin-Verify` value CloudFront sends differs from the one in the ALB rule. Both stacks take it from the secret `lore/origin-verify`; after anything that regenerated that secret, run `make aws-backend` and `make aws-frontend` so both pick it up. (A 403 XML page on `/` instead means the S3 bucket is empty: run `make aws-frontend`.)
 
-**Caddy cannot get a certificate**
-- `docker compose logs caddy`. Usually DNS does not point at the VM yet, or ports 80/443 are blocked by the cloud firewall.
+**Task keeps stopping or never becomes healthy** (`make aws-status` shows no running task, or target health `unhealthy`)
+- `aws ecs describe-services --cluster lore --services lore-api --query 'services[0].events[:5]'` shows why. Then look at the stopped task: `aws ecs list-tasks --cluster lore --desired-status STOPPED` and `aws ecs describe-tasks ... --query 'tasks[0].stoppedReason'`.
+- "ResourceInitializationError ... unable to pull secrets": the secret `lore/app` is missing a key, still unreadable, or the task has no route to the internet (the subnets need a public IP: `AssignPublicIp: ENABLED`).
+- "CannotPullContainerError": the image tag is not in ECR (run `make aws-backend`), or Docker Hub refused the FalkorDB pull (rate limit; wait and `infra/deploy.sh restart`).
+- The `api` container waits for the `falkordb` health check. If FalkorDB is unhealthy: `make aws-logs CONTAINER=falkordb`. A wrong password in the health check, or EFS not mounted (access point or security group problem), shows up there.
+- Healthy only after a while is normal on first boot: the health-check grace period is 180 s.
+
+**Graph is empty on AWS** (`/api/graph` returns nothing, or searches find nothing)
+- Look for `load_on_start_*` lines in `make aws-logs`. `load_on_start_skipped` with "no Gemini key" means the secret has no real key; fix it and `infra/deploy.sh restart`. `load_on_start_failed` carries the error.
+- Load by hand: `infra/deploy.sh exec`, then `python -m lore.loader.load` (add `--reset` to wipe first).
+
+**Browser calls fail or the persona does not stick on the CloudFront URL**
+- The page and the API share one origin, so there is no CORS and the cookie is first-party. The cookie is `HttpOnly; SameSite=Lax; Secure` (`LORE_COOKIE_SECURE=true`). If you opened the page over plain `http://`, CloudFront redirects to HTTPS; use the `https://` URL.
+- Locally (page on 5173, API on 8000) the origins differ: `LORE_CORS_ORIGINS` must contain `http://localhost:5173` and `LORE_COOKIE_SECURE` must be `false`.
+
+**`403` or `AccessDenied` from `deploy.sh`**
+- The deploying user's policy only allows names starting with `lore-` (roles, buckets) and secrets under `lore/`. Do not rename resources. See `infra/iam/lore-deployer-policy.json`.
+
+**A CloudFormation stack is stuck in `ROLLBACK_COMPLETE`**
+- `deploy.sh` deletes it for you and retries. The failure reason is printed; the full event list is in the CloudFormation console.
 
 **Gemini errors (429, quota)**
 - Switch to replay mode (section 5). Check billing is enabled in AI Studio.

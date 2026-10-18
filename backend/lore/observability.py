@@ -16,12 +16,13 @@ from typing import Any
 
 from lore.models import RunSummary
 
-# HUMAN_REVIEW: placeholder prices in USD per 1 million tokens (input, output).
-# Verify against the current Gemini pricing page before quoting any cost number.
 PRICES: dict[str, tuple[float, float]] = {
-    "gemini-3-pro-preview": (2.00, 12.00),
-    "gemini-3-flash-preview": (0.50, 3.00),
-    "gemini-embedding-001": (0.15, 0.0),
+    # USD per 1M tokens (input, output incl. thinking), Gemini API paid tier, checked Oct 18 2026
+    # at ai.google.dev/gemini-api/docs/pricing. Argon doubles Dec 1 2026, 3.8 Flash Jan 1 2027.
+    "gemini-4-argon": (2.00, 10.00),
+    "gemini-3.8-flash": (0.75, 3.75),
+    "gemini-3.5-flash-lite": (0.30, 2.50),
+    "gemini-embedding-2": (0.20, 0.0),
 }
 DEFAULT_PRICE = (2.00, 12.00)  # unknown model: assume the Pro price so cost is never understated
 

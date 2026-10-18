@@ -1,7 +1,33 @@
 # Lore: implementation state
 
-> **Last updated:** Oct 16 2026 (hackathon Day 2), end of the skeleton build. Branch `feature/initial-impl`.
+> **Last updated:** Oct 18 2026, after the first **live** local test round (real Gemini, real embeddings, real Slack/GitHub) and the AWS infra build. Branch `feature/aws-infra`. **Read §0 first**; §1–7 describe the Oct 16 skeleton.
 > Read `PROJECT_CONTEXT.md` first for the architecture and contracts. This file says **what exists, how far it was verified, and what went wrong on the way**. `PENDING_TASKS.md` is the backlog; `HUMAN_REVIEW.md` lists what needs Ayan.
+
+## 0. Oct 18 update: live local test round
+
+Everything that was "never run live" on Oct 16 has now run live, locally (FalkorDB 4.18.3 via `make db-lite`, real `gemini-embedding-2` vectors). The test config is `gemini-3.5-flash-lite` for the light agents and `gemini-3.8-flash` for the Investigator. **14 fixes**, each with cause and verification, are in [FIX_LOG.md](FIX_LOG.md).
+
+| Area | Status Oct 18 |
+|---|---|
+| `GeminiLLM` (tool calling, structured output, embeddings) | ✅ live |
+| Story A (4 personas) / Story B (memory) | ✅ live; root cause correct every run; Story B 8 → 4 Investigator steps with the playbook |
+| Ask the brain | ✅ live; graph facts added (F-06); 12/12 on the first golden questions |
+| API + SSE + cookie session | ✅ live over HTTP |
+| Real Slack post + GitHub issue | ✅ sent (issue #1 in `ayan2809/kettle-incidents`) |
+| Frontend on the real API | ✅ headless Chrome; evidence path lights up; report renders; 0 console errors |
+| Eval | Retrieval: Graph ON 75% vs OFF 38% recall@5. Generation: key facts 74% vs 44%, refusals 95% vs 68%. **0 leaks** |
+| Replays | ✅ 5 real recordings committed (`backend/replays/story_*.jsonl`); playback verified |
+| AWS infra (`infra/`) | ✅ built + validated offline (cfn-lint, validate-template ×4, shellcheck); **not deployed** (HUMAN_REVIEW "Before deploying") |
+| Tests | 304 unit + 23 integration = **327 pass** on the live graph |
+
+New challenges (details in FIX_LOG):
+- `gemini-embedding-2` merges a list of strings into one vector (F-02).
+- The model chose who to page wrongly; that's now decided in code (F-03).
+- Text-only Ask can't answer relationship questions (F-06).
+- GitHub issues could cite restricted sources; now blocked (F-09).
+- Playbooks didn't shorten runs until they were given a step budget (F-11).
+- The eval duplicated retrieval logic and reported Graph ON < OFF (F-13).
+- Integration tests write into the real graph (F-14, pending T-39).
 
 ## 1. Summary
 
@@ -14,7 +40,7 @@ The full skeleton exists and is **verified against a real FalkorDB engine** (Fal
 
 **Not yet exercised:**
 - **Live Gemini:** no key is configured. Agent prompts, structured output, function calling and real embeddings have never run.
-- **Docker, Caddy and CI:** nothing in the deployment setup has been run.
+- **Docker, the AWS deployment and CI:** the AWS templates and `deploy.sh` are written and validated offline (below) but **never deployed**; Docker Compose and the Dockerfile have never been run.
 - **The frontend against the real backend:** it has only run in mock mode.
 
 ## 2. Size
@@ -54,7 +80,9 @@ Legend: ✅ implemented and verified · 🟡 implemented, only unit-tested with 
 | `observability.py` | 🟡 | The `PRICES` table holds placeholder numbers |
 | `eval/run.py` + `scoring.py` | 🟡 | Scoring unit-tested; no full run yet (needs Gemini for the generation layer) |
 | `frontend/` | ✅ in mock mode | `npm run build` + oxlint clean; headless screenshots at 1080p and 1366×768 |
-| Docker Compose, Caddyfile, backend Dockerfile, CI | ⚪ | Written and YAML-validated; never run |
+| Docker Compose, backend Dockerfile, CI | ⚪ | Written and YAML-validated; never run (no Docker on this Mac). Caddy and Vercel config were removed (D-14 to D-16) |
+| `infra/` (AWS: 4 CloudFormation stacks, `deploy.sh`, `buildspec.yml`) | 🟡 | Oct 18, branch `feature/aws-infra`. `cfn-lint` clean; `aws cloudformation validate-template` OK for all four; `bash -n` + shellcheck clean; `deploy.sh secrets` and `backend-only` exercised against a stub `aws` (no secrets on the command line, correct params file, zip contents). **Nothing deployed; no AWS resource created.** Docs: `infra/README.md`, `RUNBOOK.md` §8–9 |
+| Same-origin changes (`LORE_COOKIE_SECURE`, rate-limit IP from `CloudFront-Viewer-Address`, `LORE_LOAD_ON_START`, loader write timeout) | ✅ | Unit tests; load-on-start also run for real against a throwaway FalkorDBLite (empty DB -> loaded in 0.7 s with fake embeddings; second start skipped) |
 | `scripts/falkordb_lite.py` (`make db-lite`) | ✅ | Used for all live verification on Oct 16 |
 | README, RUNBOOK, DECISIONS, discovery brief | 🟡 | Drafts. Results, links and the AI disclosure are TODO |
 
@@ -96,6 +124,9 @@ Legend: ✅ implemented and verified · 🟡 implemented, only unit-tested with 
 | C-10 | `run_investigation` creates its own `inv:` id, while the API has a run id | The API rewrites event ids and keeps `Run.graph_id`. A cleaner contract is in PENDING (P1) |
 | C-12 | **Real leak found in review:** as Sam (contractor), `run_cypher` returned whole `Finding` nodes, whose text can come from other viewers' restricted investigations. `visible_ids` treated every node without `access_level` as visible, and the MCP server exposed `run_cypher` | `visible_ids` now only treats org/structure labels as open; memory nodes are never visible through it. The MCP server no longer exposes `run_cypher` or `propose_action`. A regression test was added. The root fix (access levels on Findings) is PENDING T-10 |
 | C-11 | The Story bible's PR numbering and dates aren't monotonic (e.g. #479 merged after #482; deploy 990 after 991) | Kept as written; flagged for review (HUMAN_REVIEW R-02) |
+| I-01 | The FalkorDB image's `run.sh` ignores command-line arguments (read from the image layer): it builds `redis-server ${REDIS_ARGS} --protected-mode no --dir $FALKORDB_DATA_PATH --loadmodule falkordb.so ${FALKORDB_ARGS}` itself. The plan's "pass `--requirepass` as the container command" would have started FalkorDB **without a password** and with no error | The container entrypoint is `sh -c 'export REDIS_ARGS="--requirepass $FALKORDB_PASSWORD --appendonly yes"; exec run.sh'` (ECS and `docker-compose.yml`). The data directory is confirmed: `run.sh` already uses `--dir /var/lib/falkordb/data` |
+| I-02 | `GRAPH.RO_QUERY` on a graph that does not exist yet fails with "Invalid graph operation on empty key". On a brand-new ECS database that made the startup check (`RETURN 1`) fail, so load-on-start would never have run | `api/main.py` treats that error as "server reachable, graph missing" and loads the data. Verified on a real FalkorDBLite. Left for the lead: `/api/health` (`routes.py`) still reports `falkordb: false` until the graph exists |
+| I-03 | The uv image tag `0.11` and the base image were unverified for arm64; Docker Hub pull limits can break CodeBuild | `ghcr.io/astral-sh/uv:0.11.3` (index lists linux/arm64, checked via the registry API); `python:3.12-slim` from AWS's public ECR mirror (arm64 checked); `uv` resolves wheels for aarch64 for all locked dependencies (`uv pip install --dry-run --python-platform aarch64-unknown-linux-gnu --only-binary :all:`) |
 
 ## 6. How the skeleton was built
 

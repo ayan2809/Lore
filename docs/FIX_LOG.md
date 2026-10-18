@@ -1,0 +1,63 @@
+# Fix log: first live local test round (Oct 18 2026)
+
+> Every fix made while running Lore live for the first time, with real Gemini, real embeddings and real Slack/GitHub, so Ayan can review them.
+> Each entry: **what broke**, why, what changed (files), and how it was verified.
+>
+> **Test config (Ayan's decision, Oct 18):**
+> - `LORE_MODEL_FLASH=gemini-3.5-flash-lite` (Triage, Historian, Responder, report writer, playbooks, Ask);
+> - `LORE_MODEL_PRO=gemini-3.8-flash` (the Investigator's "reasoning" slot);
+> - `LORE_MODEL_EMBED=gemini-embedding-2` at 768 dims.
+>
+> `gemini-4-argon` was used **only** in the comparison runs at the end.
+>
+> Local FalkorDB: `make db-lite` (FalkorDB 4.18.3 via FalkorDBLite, port 6390). Graph loaded with **real** embeddings.
+
+## Fixes
+
+| # | What broke | Why | Fix (files) | Verified by |
+|---|---|---|---|---|
+| F-01 | `make load` failed: "No Gemini key", and the shell printed part of the key to the terminal | `.env` had a space after `=` (`LORE_GEMINI_API_KEY= …`). The Makefile `source`s `.env` with bash, which runs the value as a command; the app's own dotenv parser tolerates the space | Removed the space in `.env` (local file, not in git) | `.env` now sources cleanly; the key is set. **The key was echoed into this session's tool output, so rotating it is recommended (HUMAN_REVIEW R-32)** |
+| F-02 | The loader crashed: `zip() argument 2 is shorter than argument 1` | `gemini-embedding-2` is multimodal: a plain **list of strings** is read as ONE input and returns ONE combined vector (checked: 3 texts → 1 embedding; 3 `Content` objects → 3) | Each text is wrapped in its own `types.Content`, and the code now checks that one vector came back per text (`loader/embed.py`, `llm.py` `GeminiLLM.embed`) | `make load`: 579 chunks embedded in 26 s; 296 tests pass on the real-embedding graph |
+| F-03 | The report paged **Meera** (Checkout lead) instead of **Rahul** (Pricing owner), and named nobody to notify | Who to page was left to the model (Responder), which picked the alerted service's lead. Plan section 4 says owners are computed in code | New `_people_by_rule` in `agents/supervisor.py`: page = lead of the team owning the service the root-cause PR was deployed to; consult = top 2 hands-on experts; notify = the PR author. The Responder is told these people, and the report uses them. Test: `tests/test_people_rule.py`; `test_e2e_story_a.py` updated | Live: page Rahul, consult Marco + Nikhil, notify Priya (Story A); page Kofi, notify Tomás (Story B) |
+| F-04 | The GitHub issue showed the target `kettle/svc:pricing` (made up by the model), with no title | The model fills `target`; the real repo comes from settings, so the person approving saw a wrong target | `propose_action` (`tools.py`) shows `LORE_GITHUB_REPO` as the target for issues and adds a default title | Live: `ayan2809/kettle-incidents` with a title |
+| F-05 | Cost numbers were wrong | `observability.PRICES` still held placeholder models and prices | Real prices for `gemini-4-argon`, `gemini-3.8-flash`, `gemini-3.5-flash-lite`, `gemini-embedding-2` (`observability.py`, `tests/test_observability.py`) | Story A now costs **$0.025** with the test config |
+| F-06 | "Ask the brain" refused 9 of 12 simple lookups ("Who owns pricing?", "Who reviewed PR 482?", "Which team am I on?") | Ask only searched **text chunks**. Ownership, authorship, dependencies and team membership live in graph relationships, not in any document | New graph-facts step: `ask._entities_named` recognises ids ("PR 482", "ADR-011", "PRC-311", "deploy 991", "A-3001"), service, person and team names, and "I/me/my". The new query `queries/ask_entity_facts.cypher` returns each named node and its direct relationships, **permission-filtered** with the granted-ids pattern. `retrieval.entity_facts` / `render_facts` turn them into a citable source. A service also pulls in its owning team (and lead). The model may cite ids named in those facts. Graph OFF mode skips this step. Ask prompt: "who owns" → team + lead | Live: the first 12 golden questions went from 3/12 to **12/12** correct; eval below. New live leak test `test_ask_graph_facts_never_show_restricted_nodes_or_neighbours` |
+| F-07 | Dana's report never cited the private `#pricing-private` thread (the plan's "switch to Dana" moment), although she may see it | `trace_decision` returned only thread **ids**, so the model had nothing to cite from | `trace_decision.cypher` also returns `thread_notes` (the first 300 chars of each thread the viewer may see); `tools.py` drops the empty placeholder row. Investigator prompt: cite the discussion thread when `thread_notes` is present | Live: Dana's report cites `thread:pricing-private-0142`; Arjun and Sam get no notes, and Arjun still gets the "1 restricted source, ask the Pricing team" warning |
+| F-08 | `/api/health` would say `falkordb: false` on a brand-new AWS deploy | FalkorDB answers "empty key" when the graph doesn't exist yet | The health route treats "empty key" as reachable (`api/routes.py`) | Unit tests; the infra agent fixed the same case in startup |
+| F-09 | **Policy gap: a GitHub issue could cite a restricted source.** As Dana, the Responder drafted an issue citing `thread:pricing-private-0142`, and `kettle-incidents` is a **public** repo | The audience check only ran for Slack posts | New `policy.check_issue_citations` + `queries/policy_restricted_citations.cypher`: an issue may not cite restricted or confidential sources (the same rule as an open channel). `actions.approve` runs it for GitHub issues and fails closed. `PATCH /api/actions/{id}` now also accepts `cited_ids`, to **drop** citations (never add) so a blocked draft can be fixed. Tests in `test_actions.py` | Live: blocked with the reason for the private thread; allowed for internal-only citations |
+| F-10 | The learned playbook had the wrong steps (`find_entity, blast_radius, recent_changes`) and a too-specific symptom | The playbook writer (Flash-Lite) chose the steps | Steps are now chosen by **code**: the tools whose results contained the confirmed root cause (`recent_changes`, `evidence_path`), plus `trace_decision` if used (`memory.py`, `memory_read_investigation.cypher`). The prompt asks for a symptom that generalises across services | Live: "a service's latency rises after a code or config change in one of its dependencies" → recent_changes, evidence_path, trace_decision |
+| F-11 | The playbook didn't make Story B faster (18 steps with and without it) | The playbook only *suggested* an order; the Investigator still explored (5× `trace_decision` searching for an ADR that Story B doesn't have) | Fast path: with a confirmed playbook, the Investigator gets a budget of (playbook steps + 1) model turns and is told to run each step once (`agents/base.py` `max_steps`, `agents/supervisor.py`) | Live Story B: Investigator 8 → **4** steps, total 18 → 14, time to root cause 50 s → 39 s, cost −30%. Same root cause (`pr:517`); red herring `pr:518` still rejected |
+| F-12 | The graph canvas went blank at the end of a run ("1 node lit") | `propose_action` returned the action's id as a highlighted node; it's not in the graph, so the canvas zoomed onto one empty point | `propose_action` now highlights the graph nodes the draft cites (`tools.py`); the frontend ignores non-graph ids (`action:`, `inv:` …) (`frontend/src/hooks/investigationState.ts`) | Headless Chrome on the real UI: the evidence path lights up and the report renders with no console errors |
+| F-13 | The eval said Graph ON retrieval (26%) was **worse** than Graph OFF (38%) | `eval/run.py` had its own copy of the retrieval steps, separate from Ask, so it missed the graph facts | The eval's retrieval layer now calls the product's `ask._retrieve` + rerank, and counts the ids named in graph facts. The leak check uses the same function | Re-run: Graph ON 75% vs OFF 38%; 0 leaks |
+| F-14 | Test pollution: 4 fake-embedding playbooks appeared in the real graph | `tests/test_e2e_story_a.py` (integration) writes memory into whatever graph `LORE_GRAPH_NAME` points at | The 4 test playbooks (plus the weak one from F-10) were deleted. Root fix pending: integration tests should use their own graph (PENDING) | `MATCH (p:Playbook)` now holds only the real playbook |
+
+## Test results (live, Oct 18)
+
+| Check | Result |
+|---|---|
+| Unit tests (no DB, no Gemini) | **304 passed** (23 integration skipped) |
+| Full suite on the live graph with real embeddings | **327 passed** (incl. leak tests, live regressions, e2e Story A) |
+| Story A as Arjun (live, 6 runs) | Root cause `pr:482` 6/6; red herring `pr:479` rejected 6/6; P1 by code; people correct after F-03; ~50–60 s; **$0.022–0.027 per run** |
+| Story A as Dana | `pr:482`; cites the private thread after F-07; no "restricted" warning (she may see it) |
+| Story A as Sam (contractor) | No root cause (he may not see PRs or deploys, correct by design); "100 restricted sources matched": technically right but reads oddly (HUMAN_REVIEW R-33) |
+| Story B before/after playbook | 8 → 4 Investigator steps (F-11) |
+| HTTP API + SSE | 51–53 events streamed per run; cookie session; per-persona graph view (196 nodes Arjun/Dana) |
+| Real outward actions (Arjun's run, approved by the test) | Slack post **sent** to the webhook; GitHub issue **created**: https://github.com/ayan2809/kettle-incidents/issues/1 (both prefixed "[Lore local test - please ignore]") |
+| Policy block (F-09) | An issue citing the private thread → blocked with the reason |
+| Real UI (headless Chrome, 1920×1080) | Graph renders; agents light the evidence path; report, people, restricted warning and actions render; 0 console errors |
+| Eval, retrieval (59 questions) | Graph ON **75%** recall@5 vs Graph OFF **38%** (lookup 93% vs 11%, stale 76% vs 29%); **0 forbidden ids** |
+| Eval, generation (59 questions, Ask end to end) | Graph ON vs OFF: key facts **74% vs 44%**, claims cited **69% vs 51%**, refusals correct **95% vs 68%**, **0 leaks**. *Run before F-06's ownership-prompt tweak; re-run for final numbers* |
+| Permission leak check (4 personas × 63 probes) | **0** |
+
+## Reasoning-model comparison: `gemini-4-argon` vs `gemini-3.8-flash` (Investigator)
+
+Same code and data; only `LORE_MODEL_PRO` changed. Other agents stay on `gemini-3.5-flash-lite`. Story A ×2 and Story B ×1 per model.
+
+| Model | Correct root cause | Red herring rejected | Confidence | Investigator steps | Time to root cause | Total time | Cost per investigation |
+|---|---|---|---|---|---|---|---|
+| `gemini-3.8-flash` | 3/3 | 3/3 | 0.90–0.95 | 3–4 | 42–48 s | 51–58 s | **$0.022–0.024** |
+| `gemini-4-argon` | 3/3 | 3/3 | 0.90–0.98 | 3–4 | 55–94 s | 64–104 s | **$0.040–0.043** |
+
+The written findings were equivalent: same cause, same rejection, same ADR violation. Argon's text adds slightly more context (it noted that ADR-011 supersedes the wiki page).
+
+**Recommendation: keep `gemini-3.8-flash` as the reasoning model.** On this data it's as accurate, ~1.5× faster and ~45% cheaper per investigation. Argon doubles in price on Dec 1. The sample is small (3 runs each), so re-check if you change prompts or add harder stories.

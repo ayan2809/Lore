@@ -515,6 +515,8 @@ def trace_decision(ctx: ToolContext, args: TraceDecisionArgs) -> ToolResult:
     ids, edges, hidden, hint = [], [], 0, None
     for r in rows:
         d = r["decision_id"]
+        # OPTIONAL MATCH with no visible thread still collects one {id: null} map: drop it.
+        r["thread_notes"] = [n for n in r.get("thread_notes") or [] if n.get("id")]
         ids += [d, *r["threads"], *r["supersedes"], *r["superseded_by"]]
         edges += [EdgeRef(source=d, target=t, type="DISCUSSED_IN") for t in r["threads"]]
         edges += [EdgeRef(source=d, target=o, type="SUPERSEDES") for o in r["supersedes"]]
@@ -640,18 +642,28 @@ class ProposeActionArgs(ToolArgs):
 )
 def propose_action(ctx: ToolContext, args: ProposeActionArgs) -> ToolResult:
     from lore import actions  # lazy: written by the API work package
+    from lore.config import get_settings
 
+    target, title = args.target, args.title or None
+    if args.kind == "github_issue":
+        # Issues always go to the configured demo repo; show that, not the model's guess, to
+        # the person approving (FIX_LOG F-04). A missing title gets a plain default.
+        target = get_settings().github_repo or target
+        title = title or f"Incident follow-up: {args.text.split('.')[0][:80]}"
     action = actions.propose(
         investigation_id=ctx.investigation_id,
         kind=args.kind,
-        target=args.target,
+        target=target,
         text=args.text,
         cited_ids=args.cited_ids,
-        title=args.title or None,
+        title=title,
     )
     unseen = [c for c in args.cited_ids if c not in ctx.seen_ids]
     data = [{**action.model_dump(), "unverified_citations": unseen}]
-    return ToolResult(tool="propose_action", reason=args.reason, data=data, node_ids=[action.id])
+    # Highlight what the draft cites (graph nodes), not the action id, which is not in the graph
+    # and made the UI zoom onto an empty spot (FIX_LOG F-12).
+    cited = [c for c in args.cited_ids if c in ctx.seen_ids]
+    return ToolResult(tool="propose_action", reason=args.reason, data=data, node_ids=cited)
 
 
 # ------------------------------------------------------------------ 12. run_cypher (safety net)

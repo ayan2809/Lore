@@ -1,0 +1,22 @@
+# CodeBuild recipe for the Lore API image. deploy.sh copies this file into backend.zip, so these
+# commands run from the unzipped backend/ folder (where the Dockerfile is).
+# Project environment variables (set in infra/cfn/registry.yaml / by deploy.sh):
+#   REPO_URI   the ECR repository, e.g. 355426657170.dkr.ecr.ap-south-1.amazonaws.com/lore-api
+#   IMAGE_TAG  the git sha of this build
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      # Privileged mode starts the Docker daemon; wait until it answers.
+      - timeout 60 sh -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${REPO_URI%%/*}"
+  build:
+    commands:
+      - echo "Building $REPO_URI:$IMAGE_TAG on $(uname -m)"
+      - docker build -t "$REPO_URI:$IMAGE_TAG" -t "$REPO_URI:latest" .
+  post_build:
+    commands:
+      - docker push "$REPO_URI:$IMAGE_TAG"
+      - docker push "$REPO_URI:latest"
+      - echo "Pushed $REPO_URI:$IMAGE_TAG"

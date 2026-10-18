@@ -29,6 +29,10 @@ docs/reference/falkordb_documentation.html
 backend/eval/report.md
 backend/replays/*.jsonl
 !backend/replays/.gitkeep
+# Recorded golden runs ARE committed: they are the demo's fallback if Gemini is down (FIX_LOG).
+!backend/replays/story_*.jsonl
+# Ad-hoc eval reports (the numbers that matter go into docs)
+backend/eval/report_*.md
 logs/
 
 # FalkorDBLite data (make db-lite)

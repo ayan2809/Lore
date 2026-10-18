@@ -133,6 +133,21 @@ def check_post_audience(graph: GraphLike, channel_id: str, cited_ids: list[str])
     )
 
 
+def check_issue_citations(graph: GraphLike, cited_ids: list[str]) -> PolicyDecision:
+    """A GitHub issue may not cite restricted or confidential sources (FIX_LOG F-09)."""
+    if not cited_ids:
+        return PolicyDecision(True)
+    rows = graph.ro(load_query("policy_restricted_citations"), {"cited_ids": list(cited_ids)})
+    bad = sorted({r["source_id"] for r in rows.dicts()})
+    if not bad:
+        return PolicyDecision(True)
+    return PolicyDecision(
+        False,
+        f"Blocked: a GitHub issue is readable outside the restricted teams, but it cites "
+        f"{', '.join(bad)}. Remove those citations (and anything taken from them) first.",
+    )
+
+
 # ------------------------------------------------------------------ request policy
 
 _ROLLBACK = re.compile(r"\b(roll\s*back|rollback|revert)\b", re.I)

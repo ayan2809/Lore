@@ -114,7 +114,9 @@ async def test_story_a_as_arjun_finds_pr_482_and_hides_the_private_thread(falkor
         "deploy:991",
         "pr:482",
     ]
-    assert report.people.page == "person:rahul" and report.people.consult == ["person:marco"]
+    # People are decided by rule in code (FIX_LOG F-03), whatever the model suggests.
+    assert report.people.page == "person:rahul" and report.people.consult[0] == "person:marco"
+    assert report.people.notify == ["person:priya"]
     assert [c.citations for c in report.dropped_claims] == [["pr:999"]]  # invented id dropped
     assert report.restricted_matches >= 1  # ADR-011's private discussion exists...
     every_id = {i for e in events for i in e.payload.get("node_ids", [])}

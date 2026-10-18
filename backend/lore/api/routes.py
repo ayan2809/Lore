@@ -80,6 +80,8 @@ class FeedbackBody(BaseModel):
 
 class EditBody(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+    # Optional: the citations to keep. Lets a reviewer drop a restricted source (FIX_LOG F-09).
+    cited_ids: list[str] | None = None
 
 
 # ------------------------------------------------------------------------------ helpers
@@ -118,8 +120,10 @@ async def health(
         try:
             await asyncio.wait_for(asyncio.to_thread(graph.ro, "RETURN 1"), 2)
             falkordb = True
-        except Exception:
-            pass
+        except Exception as exc:
+            # A brand-new database has no graph yet ("empty key"): the server is up, the
+            # loader just has not run (FIX_LOG F-08).
+            falkordb = "empty key" in str(exc).lower()
     gemini = bool(settings.gemini_api_key)
     return {"status": "ok", "falkordb": falkordb, "gemini": gemini,
             "replay": settings.force_replay or not gemini}
@@ -316,7 +320,7 @@ def edit_action(
     registry: RunRegistry = Depends(runs.get_registry),
 ) -> Action:
     _own_action(registry, action_id, viewer)
-    return _action_errors(lambda: actions.edit(action_id, body.text))
+    return _action_errors(lambda: actions.edit(action_id, body.text, body.cited_ids))
 
 
 @router.post("/actions/{action_id}/approve")

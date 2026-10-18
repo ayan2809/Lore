@@ -135,7 +135,9 @@ class PlaybookDraft(BaseModel):
 
 
 PLAYBOOK_PROMPT = """You turn a confirmed incident investigation into a reusable playbook.
-Generalise: do not name specific services, people or PRs in `name` or `symptom_pattern`.
+Generalise: do not name specific services, people or PRs in `name` or `symptom_pattern`. Describe
+the symptom so it also fits the same failure on a different service (e.g. "a service's latency
+rises after a config or cache TTL change in one of its dependencies").
 `steps` must only use tool names from the list you are given, in a sensible order, and should
 be the shortest sequence that would have found the root cause."""
 
@@ -169,7 +171,12 @@ async def save_playbook(
     draft: PlaybookDraft | None = resp.parsed
     if draft is None:
         return None
-    steps = [s for s in draft.steps if s in tools_used] or tools_used  # never invent tools
+    # The steps are decided by code, not the model (FIX_LOG F-10): the tools whose results
+    # contained the confirmed root cause, plus trace_decision if it was used (it explains why).
+    key = list(dict.fromkeys(t for t in (inv.get("key_tools") or []) if t))
+    if key and "trace_decision" in tools_used and "trace_decision" not in key:
+        key.append("trace_decision")
+    steps = key or [s for s in draft.steps if s in tools_used] or tools_used  # never invent tools
     [vec] = await llm.embed([draft.symptom_pattern], "document")
     playbook_id = f"playbook:{investigation_id.split(':')[-1]}"
     await asyncio.to_thread(

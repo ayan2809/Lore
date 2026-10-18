@@ -27,7 +27,9 @@ Your job: find the change that caused the alert, and prove it.
 
 In your findings: name the root cause PR id in `root_cause`, give one finding per rejected
 suspect starting with "Rejected:" and saying why, and one finding for the decision or past
-incident the change contradicts. If no suspect survives testing, say so and keep confidence low.
+incident the change contradicts. If trace_decision returns `thread_notes` (the discussion behind
+a decision that you are allowed to see), add one finding that says what was discussed and cites
+that thread id. If no suspect survives testing, say so and keep confidence low.
 """
     + COMMON_RULES
 )

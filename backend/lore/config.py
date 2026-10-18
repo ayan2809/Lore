@@ -1,6 +1,7 @@
 """Settings, read from environment variables (or backend/.env)."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,9 +18,9 @@ class Settings(BaseSettings):
 
     # Gemini. Model ids are placeholders: confirm the exact ids in AI Studio (HUMAN_REVIEW R-04).
     gemini_api_key: str | None = None
-    model_pro: str = "gemini-3-pro-preview"
-    model_flash: str = "gemini-3-flash-preview"
-    model_embed: str = "gemini-embedding-001"
+    model_pro: str = "gemini-3.8-flash"
+    model_flash: str = "gemini-3.5-flash-lite"
+    model_embed: str = "gemini-embedding-2"
     embed_dim: int = 768
     # Must match how the graph was loaded: true after `load --fake-embeddings` (offline only).
     fake_embeddings: bool = False
@@ -33,6 +34,12 @@ class Settings(BaseSettings):
     session_secret: str = "dev-only-change-me"
     cors_origins: list[str] = ["http://localhost:5173"]
     rate_limit_per_minute: int = 20
+    # True when the site is served over HTTPS (the cookie then gets the Secure flag). Off by
+    # default so http://localhost works. On AWS (CloudFront) it is true.
+    cookie_secure: bool = False
+    # "if_empty": at startup, if the graph has no :Service nodes, load backend/data in a background
+    # thread (used on AWS, where the graph starts empty on a new EFS volume). "never": do nothing.
+    load_on_start: Literal["never", "if_empty"] = "never"
 
     # Replay mode: play back a recorded run instead of calling Gemini
     replay_dir: str = "replays"

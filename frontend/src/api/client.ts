@@ -5,6 +5,8 @@ import { mockApi } from './mock'
 import { EVENT_TYPES } from './types'
 import type { Api, EventType, StepEvent } from './types'
 
+// VITE_API_BASE='' (empty) means "same origin": the AWS build is served by the same CloudFront
+// domain as /api. Only an unset variable falls back to localhost, which is why this is `??`.
 const BASE = (import.meta.env.VITE_API_BASE ?? 'http://localhost:8000').replace(/\/$/, '')
 
 export class ApiError extends Error {

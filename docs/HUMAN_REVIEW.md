@@ -1,10 +1,19 @@
 # Human review: things that need Ayan
 
-> **Last updated:** Oct 18 2026 (deadline 23:59 IST tonight), after the AWS infra planning.
+> **Last updated:** Oct 18 2026 (deadline 23:59 IST tonight), after the first live local test round (see [FIX_LOG.md](FIX_LOG.md)) and the infra build.
 >
 > **How to answer:** write on the `> **Answer:**` line under the item (e.g. `> **Answer:** OK with C1–C8, but use ayan2809/kettle-incidents`), then tick the box `[x]` when nothing more is needed. A short answer is fine: "OK", "change X to Y", "skip". Agents read this file before working and act on your answers. They never tick a box or invent an answer for you.
 >
-> Agents: add new items at the bottom of the right section with the next free number (next free: **R-32**).
+> Agents: add new items at the bottom of the right section with the next free number (next free: **R-36**).
+
+## Before deploying to AWS: what is still open
+
+The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304 unit tests), and local live testing passed ([FIX_LOG.md](FIX_LOG.md)). **The agent stopped before deploying because these need you:**
+
+1. **R-31:** budget raise, Gemini spend alert, **public-URL protection** (not implemented yet: anyone with the link can run paid investigations), and which secrets command to use (C10).
+2. **R-34:** keep `gemini-3.8-flash` as the reasoning model, or switch to Argon (sets the deploy's `ModelPro`).
+3. **R-32:** rotate the Gemini key (it was echoed into a test log), then use the new key for the deploy.
+4. Then run the deploy yourself (R-12 has the exact commands), or tell an agent "deploy", once 1–3 are answered.
 
 ## A. Do now (blocking deploy or demo)
 
@@ -24,19 +33,22 @@
   - [x] GitHub demo repo `ayan2809/kettle-incidents` + fine-grained token (in `.env`)
   - [x] **Fix one line in `.env`:** it reads `LORE_GITHUB_REPO=LORE_GITHUB_REPO=ayan2809/kettle-incidents` (the key is doubled). Change it to `LORE_GITHUB_REPO=ayan2809/kettle-incidents`, otherwise GitHub issue creation will fail
   - [ ] Check the GitHub token is scoped to `kettle-incidents` only, with Issues: read & write
-  - [ ] After the `lore-registry` stack exists: `make aws-secrets`. If you OK C10 (R-31 item 5), it copies the Gemini key, Slack webhook and GitHub token from your `.env` into Secrets Manager (prompting only for anything missing) and generates the session secret and FalkorDB password. Use the CLI as `ayan-mac`; no console or root needed
-  - [ ] Approve and run the deploy command (an agent prepares it but never runs it)
+  - [ ] Deploy (built Oct 18; commands from `infra/deploy.sh`, all as `ayan-mac`):
+    1. `make aws-deploy`: creates `lore-network` + `lore-registry`, then **stops** because the secret `lore/app` still holds `CHANGE_ME`.
+    2. `make aws-secrets-from-env` (C10: copies the Gemini key, Slack webhook and GitHub token from `.env`, never printing them) **or** `make aws-secrets` (hidden prompts). Both generate the session secret and FalkorDB password.
+    3. `make aws-deploy` again: image build in CodeBuild (ARM64), the ECS app, the website. Prints `https://dxxxx.cloudfront.net` (30–45 min the first time; on first boot the API loads the graph with real embeddings, ~2–5 min).
+    4. `make aws-status`, `make aws-logs` to check; `make aws-destroy` to tear everything down (type `lore`).
   - [ ] Local tools: `brew upgrade awscli`, `brew install --cask session-manager-plugin` (optional: `brew install shellcheck`)
   > **Answer:** - yes the github token is scoped only to the kettle incidents. 
 
-- [ ] **R-29 · First live run with Gemini, locally (no Docker needed).** The LLM side has never run live, so this is the biggest remaining risk. Steps:
+- [x] **R-29 · First live run with Gemini, locally (no Docker needed).** *Done by an agent on Oct 18 with your test config; 14 fixes in [FIX_LOG.md](FIX_LOG.md). You can still click through it yourself with the steps below.* Steps:
   1. In `.env`, set `LORE_FALKORDB_PORT=6390` (done by Ayan, Oct 18), and fix the doubled `LORE_GITHUB_REPO` line (R-12). Keep `LORE_FAKE_EMBEDDINGS=false`. With the Slack webhook and GitHub token now set, approving an action locally **posts for real** to Slack and opens a real issue in `kettle-incidents`.
   2. Terminal 1: `make db-lite`.
   3. Terminal 2: `make load`, then `make api`.
   4. Terminal 3: `make web`, then open http://localhost:5173 and click "▶ Run the 3 AM incident" as Arjun.
 
   Write here what broke (or "worked"), so an agent can fix it.
-  > **Answer:**
+  > **Answer:** (agent) Story A/B, Ask, SSE, real Slack post + GitHub issue #1, and the UI all work locally. See FIX_LOG.
 
 - [x] **R-28 · Budget vs runtime.** About $2.2/day while deployed, so $12 covers about 5 days. The rules file (`docs/hackathon-context.md`) gives no judging dates, so check Discord or the rules page for how long judges need the live link. Then: raise the budget, or tear down after judging (`make aws-destroy`) and rely on the video and replay?
   > **Answer:** Keep it running for at least 30 days (Ayan, Oct 18). **Follow-up needed:** at about $2.2/day the infra alone is about $66 for 30 days, plus Gemini usage, so the $12/month budget will trigger in about 5 days. See R-31.
@@ -52,7 +64,22 @@
      - (b) live runs need a short demo code you give the judges; everyone else gets the replay;
      - (c) no extra protection: rely on the per-IP rate limit and the alerts.
   4. **Optional infra saving:** shrink the task from 1 vCPU / 2 GB to 0.5 vCPU / 1 GB (ARM). It saves about $0.55/day (~$16 per 30 days); the small graph fits, but investigations may feel slower. Keep 1 vCPU / 2 GB unless the budget is tight.
-  5. **OK for INFRA_PLAN C10?** `make aws-secrets` copies the Gemini key, Slack webhook and GitHub token from your local `.env` into Secrets Manager (never printing them), and prompts only for missing values. The alternative is typing them in at hidden prompts.
+  5. **Which secrets command (C10)?** Both are built: `make aws-secrets-from-env` (copies the Gemini key, Slack webhook and GitHub token from your local `.env`, never printing them) or `make aws-secrets` (hidden prompts). Pick one; nothing else depends on it.
+  > **Answer:**
+
+
+- [ ] **R-32 · Rotate the Gemini API key.** During testing, a malformed `.env` line made bash print part of the key into this session's tool output (FIX_LOG F-01). It never went into git or any file in the repo. Create a new key in AI Studio, put it in `.env`, delete the old one, and use the new one for the AWS secret.
+  > **Answer:**
+
+- [ ] **R-34 · Reasoning model: keep `gemini-3.8-flash` or switch to `gemini-4-argon`?** Measured on Oct 18 (FIX_LOG, last section): both 3/3 correct with the same red-herring rejection; 3.8-flash is ~1.5× faster ($0.022–0.024 vs $0.040–0.043 per investigation), and Argon doubles in price on Dec 1. **Recommendation: keep 3.8-flash** (the infra default `ModelPro=gemini-3.8-flash`). Also: keep `gemini-3.5-flash-lite` for the other agents and Ask?
+  > **Answer:**
+
+- [ ] **R-35 · Things the live test showed you should know before the demo:**
+  - **Real actions went out:** one Slack post to your webhook channel and GitHub issue #1 in `kettle-incidents`, both prefixed "[Lore local test - please ignore]". Delete or close them before recording if you like.
+  - **New policy (F-09):** GitHub issues may not cite restricted or confidential sources, because the repo is public. A blocked draft can be fixed by dropping citations (`PATCH /api/actions/{id}` with `cited_ids`); the UI has no button for that yet (PENDING).
+  - **Who to contact is now decided by code (F-03):** page = the owning team's lead of the service where the root cause landed; consult = top 2 experts; notify = the PR author. The model only words it.
+  - **Story B memory demo:** with the learned playbook the Investigator takes **4 steps instead of 8** (not "11 → 4" as the plan's video script says). Use the measured numbers in the video.
+  - **First run on AWS:** about a minute of downtime per deploy (single task); the FalkorDB image is pulled from Docker Hub anonymously (a rate-limit failure is fixed by `infra/deploy.sh restart`).
   > **Answer:**
 
 ## B. Decisions an AI made that you must own (rules 12–13: "explain every part", "no AI slop")
@@ -138,19 +165,23 @@
   - **Actions panel:** on 1080p it's below the report. Move it above?
   - **Persona switch:** switching resets the run. Auto re-run instead?
   - **Mock timeout:** delete the deliberate timeout step in `mock.ts` for a cleaner video?
+  - **Graph zoom at the end of a live run** (seen Oct 18): after the last step, the auto-zoom leaves the graph cramped in one corner with overlapping labels. Suggestion: zoom to the evidence path when the report arrives. OK to change?
+  > **Answer:**
+
+- [ ] **R-33 · Sam's report says "100 restricted sources matched".** For a contractor almost everything is internal, so the count hits the search limit. It's correct but reads oddly on screen. Show "many (100+)" instead, or leave it?
   > **Answer:**
 
 - [ ] **R-17 · Offline gotcha.** Approving a replayed Slack action with FalkorDB down is blocked (fail-closed). Fine?
   > **Answer:**
 
-- [x] **R-15 · Prices.** Looked up by an agent on Oct 18 (ai.google.dev pricing, paid tier, per 1M tokens): `gemini-4-argon` $2.00 in / $10.00 out (doubles Dec 1 2026); `gemini-3.8-flash` $0.75 in / $3.75 out (doubles Jan 1 2027); `gemini-embedding-2` $0.20 in. Thinking tokens are billed as output. Still to do (agent, PENDING T-17): put these into `observability.PRICES`.
+- [x] **R-15 · Prices.** Looked up by an agent on Oct 18 (ai.google.dev pricing, paid tier, per 1M tokens): `gemini-4-argon` $2.00 in / $10.00 out (doubles Dec 1 2026); `gemini-3.8-flash` $0.75 in / $3.75 out (doubles Jan 1 2027); `gemini-embedding-2` $0.20 in. Thinking tokens are billed as output. Done: in `observability.PRICES`, plus `gemini-3.5-flash-lite` $0.30 in / $2.50 out (FIX_LOG F-05).
   > **Answer:** (none needed)
 
 ## D. Security and config (rewritten Oct 18 for AWS)
 
 - [ ] **R-13 · Production settings in the AWS plan.** Confirm you're OK with all of these:
   - Session secret and FalkorDB password: **generated** by `deploy.sh secrets`, stored only in Secrets Manager `lore/app`.
-  - `X-Origin-Verify` secret: generated by `deploy.sh`, stored in SSM `/lore/origin-verify`, never in git.
+  - `X-Origin-Verify` secret: generated by the `lore-registry` stack in Secrets Manager `lore/origin-verify` (not SSM: the deployer policy has no SSM write), never in git.
   - The ALB accepts only CloudFront's IP list, and returns 403 without the header.
   - Cookie `HttpOnly; Secure; SameSite=Lax` (`LORE_COOKIE_SECURE=true` in ECS).
   - CORS empty (same origin).
@@ -166,13 +197,15 @@
     - CodeBuild has ARM images in ap-south-1;
     - the API pings SSE every 15 s and runs a single uvicorn worker;
     - the quotas are enough;
-    - `gemini-embedding-2` accepts 768 dimensions (you confirmed).
+    - `gemini-embedding-2` accepts 768 dimensions (you confirmed); it needs one `Content` per text (FIX_LOG F-02);
+    - the uv image `0.11.3` and the `python:3.12-slim` mirror exist for arm64; every Python dependency has an aarch64 wheel;
+    - the FalkorDB image runs as root, has `redis-cli`, and its `run.sh` builds the command from `$REDIS_ARGS` (so the password goes there, not as command arguments; the plan's C3 was wrong and the infra agent corrected it);
+    - `TIMEOUT_DEFAULT` / `TIMEOUT_MAX` exist in FalkorDB 4.18.
   - **Still unverified until the first deploy:**
     - Redis actually persists to EFS (restart test);
     - our image builds on arm64 (wheels, uv image tag);
     - SSE works through CloudFront for a whole investigation;
     - the cookie works on the CloudFront URL from a phone;
-    - FalkorDB 4.18.3 accepts `TIMEOUT_DEFAULT` / `TIMEOUT_MAX`;
     - first CloudFront use on this account (some new accounts need verification).
 
   Nothing to answer unless you want to change the plan. Tick it after the first deploy checks pass.
@@ -180,7 +213,7 @@
 
 ## E. Done / FYI
 
-- [x] **R-04 · Gemini key + model ids.** Done by Ayan (Oct 18): `gemini-4-argon` (Pro), `gemini-3.8-flash` (Flash), `gemini-embedding-2` at 768 dims, all set in `.env`. Note: the defaults in `backend/lore/config.py` are still the old placeholders; the infra change will update them to these ids.
+- [x] **R-04 · Gemini key + model ids.** Done by Ayan (Oct 18): `gemini-4-argon` (Pro), `gemini-3.8-flash` (Flash), `gemini-embedding-2` at 768 dims, all set in `.env`. Testing config since Oct 18 (`.env` and `config.py` defaults): `LORE_MODEL_PRO=gemini-3.8-flash`, `LORE_MODEL_FLASH=gemini-3.5-flash-lite` (see R-34).
 - [x] **R-19 · Docker.** Resolved: not needed. Local dev uses `make db-lite` (real FalkorDB via FalkorDBLite), and AWS builds images with CodeBuild. Install Docker Desktop only if you want the FalkorDB Browser UI for a video shot.
 - **R-20 · Schedule.** It's Oct 18 (deadline 23:59 IST). Order of work: R-29 local live run ∥ infra implementation → deploy → phone check → README/video. The plan's feature freeze is 12:00 IST today; after that, only fixes and finishing.
 - **R-22 · Moved files.** The plan and the rules are in `docs/`; the FalkorDB HTML docs are in `docs/reference/` (gitignored).

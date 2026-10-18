@@ -8,20 +8,20 @@ SHELL := /bin/bash
 LOAD_ENV = set -a; [ -f ../.env ] && . ../.env; set +a;
 BACKEND  = cd backend && $(LOAD_ENV)
 
-# TODO(Ayan): fill in once you have a VM. Example: VM_HOST=ubuntu@203.0.113.10 make deploy
-VM_HOST ?=
-VM_DIR  ?= ~/lore
+# Which container `make aws-logs` follows: api or falkordb.   Example: make aws-logs CONTAINER=falkordb
+CONTAINER ?= api
 
-.PHONY: help setup db db-lite down gen text load load-fake api web mock test test-all lint eval mcp deploy reset
+.PHONY: help setup db db-lite down gen text load load-fake api web mock test test-all lint eval mcp reset \
+        aws-deploy aws-secrets aws-secrets-from-env aws-frontend aws-backend aws-status aws-logs aws-destroy
 
 help: ## Show this list of commands
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-20s %s\n", $$1, $$2}'
 
 setup: ## Install backend (uv sync) and frontend (npm install) dependencies
 	cd backend && uv sync
 	cd frontend && npm install
 
-db: ## Start FalkorDB in Docker (port 6379, Browser on http://localhost:3000)
+db: ## Start FalkorDB in Docker (port 6379; the server image has no Browser UI)
 	docker compose up -d falkordb
 
 db-lite: ## No Docker? Run a real FalkorDB via FalkorDBLite on port 6390 (set LORE_FALKORDB_PORT=6390)
@@ -67,17 +67,30 @@ eval: ## Run the golden questions, Graph ON and OFF, and write backend/eval/repo
 mcp: ## Run the MCP server (same tools as the agents, for Gemini CLI etc.)
 	$(BACKEND) uv run python -m lore.mcp_server
 
-deploy: ## Copy the repo to the VM and start the prod stack (set VM_HOST first)
-	@if [ -z "$(VM_HOST)" ]; then \
-	  echo "TODO: set VM_HOST, e.g.  VM_HOST=ubuntu@203.0.113.10 make deploy"; \
-	  echo "      The VM needs Docker + the compose plugin, and a copy of .env (see docs/RUNBOOK.md)."; \
-	  exit 1; \
-	fi
-	rsync -az --delete \
-	  --exclude '.git' --exclude '.env' --exclude '.venv' --exclude 'node_modules' \
-	  --exclude 'frontend' --exclude '__pycache__' --exclude 'docs/reference' \
-	  ./ $(VM_HOST):$(VM_DIR)/
-	ssh $(VM_HOST) 'cd $(VM_DIR) && docker compose --profile prod up -d --build'
+# ---- AWS (see infra/README.md). All of these call infra/deploy.sh; the region is ap-south-1.
+aws-deploy: ## AWS: create/update everything (network, registry, image build, app, website)
+	infra/deploy.sh deploy
+
+aws-secrets: ## AWS: fill the secret lore/app (asks for the keys with hidden input)
+	infra/deploy.sh secrets
+
+aws-secrets-from-env: ## AWS: same, but read Gemini/Slack/GitHub from the root .env
+	infra/deploy.sh secrets --from-env
+
+aws-frontend: ## AWS: rebuild the React app and publish it (S3 + CloudFront)
+	infra/deploy.sh frontend-only
+
+aws-backend: ## AWS: rebuild the API image in CodeBuild and redeploy the app
+	infra/deploy.sh backend-only
+
+aws-status: ## AWS: stacks, running task, load balancer health, public URL
+	infra/deploy.sh status
+
+aws-logs: ## AWS: follow container logs (CONTAINER=api or falkordb)
+	infra/deploy.sh logs $(CONTAINER)
+
+aws-destroy: ## AWS: delete everything (asks you to type "lore")
+	infra/deploy.sh destroy
 
 reset: ## Delete the FalkorDB data volume and restart an empty database (then run make load)
 	docker compose down -v

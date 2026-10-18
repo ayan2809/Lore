@@ -42,7 +42,9 @@ class GraphLike(Protocol):
 
     def ro(self, cypher: str, params: dict[str, Any] | None = None) -> QueryOutcome: ...
 
-    def write(self, cypher: str, params: dict[str, Any] | None = None) -> QueryOutcome: ...
+    def write(
+        self, cypher: str, params: dict[str, Any] | None = None, timeout_ms: int | None = None
+    ) -> QueryOutcome: ...
 
 
 class GraphClient:
@@ -63,9 +65,12 @@ class GraphClient:
         res = self._graph.ro_query(cypher, params or {}, timeout=self.settings.query_timeout_ms)
         return self._outcome(res, start, cypher, params)
 
-    def write(self, cypher: str, params: dict[str, Any] | None = None) -> QueryOutcome:
+    def write(
+        self, cypher: str, params: dict[str, Any] | None = None, timeout_ms: int | None = None
+    ) -> QueryOutcome:
+        """Run a write. `timeout_ms` caps this one query (None = FalkorDB's default timeout)."""
         start = time.perf_counter()
-        res = self._graph.query(cypher, params or {})
+        res = self._graph.query(cypher, params or {}, timeout=timeout_ms)
         return self._outcome(res, start, cypher, params)
 
     def delete_graph(self) -> None:

@@ -24,15 +24,18 @@ def _serializer(settings: Settings) -> URLSafeSerializer:
 
 
 def set_persona(response: Response, persona_id: str, settings: Settings) -> None:
-    """Write the signed cookie. A frontend on another HTTPS domain needs SameSite=None."""
-    cross_site = any(o.startswith("https://") for o in settings.cors_origins)
+    """Write the signed cookie.
+
+    The page and the API share one origin (CloudFront serves both), so SameSite=Lax is enough.
+    `Secure` follows LORE_COOKIE_SECURE: true behind HTTPS, false for http://localhost.
+    """
     response.set_cookie(
         COOKIE_NAME,
         _serializer(settings).dumps({"persona": persona_id}),
         max_age=MAX_AGE_S,
         httponly=True,
-        secure=cross_site,
-        samesite="none" if cross_site else "lax",
+        secure=settings.cookie_secure,
+        samesite="lax",
     )
 
 

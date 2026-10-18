@@ -23,12 +23,16 @@ class RecordingGraph:
 
     def __init__(self, fail_index_with: str | None = None):
         self.writes: list[tuple[str, dict[str, Any]]] = []
+        self.timeouts: list[int | None] = []  # the timeout_ms of each write, in order
         self.fail_index_with = fail_index_with
 
-    def write(self, cypher: str, params: dict[str, Any] | None = None) -> QueryOutcome:
+    def write(
+        self, cypher: str, params: dict[str, Any] | None = None, timeout_ms: int | None = None
+    ) -> QueryOutcome:
         if self.fail_index_with and "INDEX" in cypher.upper() and "FOR (n:Person)" in cypher:
             raise RuntimeError(self.fail_index_with)
         self.writes.append((cypher, params or {}))
+        self.timeouts.append(timeout_ms)
         return QueryOutcome(header=[], rows=[], ms=0.0)
 
     def ro(self, cypher: str, params: dict[str, Any] | None = None) -> QueryOutcome:
@@ -233,6 +237,13 @@ def test_full_load_runs_offline_and_is_made_of_merges():
     chunk_rows = [p["rows"] for c, p in graph.writes if "MERGE (c:Chunk" in c]
     first = chunk_rows[0][0]
     assert first["props"]["access_level"] and len(first["embedding"]) == 768
+
+
+def test_bulk_writes_carry_a_30_second_timeout():
+    graph = RecordingGraph()
+    load.load_all(graph, fake_embeddings=True, log=lambda *_: None)
+    bulk = [t for (c, _), t in zip(graph.writes, graph.timeouts, strict=True) if "UNWIND" in c]
+    assert bulk and set(bulk) == {30_000}
 
 
 def test_extracted_mentions_never_duplicate_explicit_ones():

@@ -49,7 +49,7 @@ jobs:
         working-directory: backend
     services:
       falkordb:
-        image: falkordb/falkordb:latest
+        image: falkordb/falkordb-server:v4.18.3 # the same image as on AWS
         ports:
           - 6379:6379
         options: >-

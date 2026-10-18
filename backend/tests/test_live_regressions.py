@@ -52,3 +52,20 @@ def test_post_audience_blocks_a_private_citation_in_incidents(graph):
     allowed = check_post_audience(graph, "#incidents", ["pr:482", "adr:011"])
     assert not blocked.allowed and PRIVATE in blocked.reason
     assert allowed.allowed
+
+
+def test_ask_graph_facts_never_show_restricted_nodes_or_neighbours(graph):
+    """FIX_LOG F-06: Ask's graph facts go through the same permission rule."""
+    from lore.retrieval import entity_facts
+
+    secret = {PRIVATE, "thread:pricing-private-0150", "inc:INC-0326", "thread:hr-private-0003",
+              "thread:sec-incidents-0007"}
+    asked = sorted(secret) + ["adr:011", "svc:pricing", "person:marco", "pr:482"]
+    for persona in ("arjun", "sam", "marco"):
+        found = entity_facts(_ctx(persona, graph), asked)
+        seen = {c.id for c in found} | {i for c in found for i in c.related_ids}
+        assert not seen & secret, (persona, seen & secret)
+    sam_ids = {c.id for c in entity_facts(_ctx("sam", graph), asked)}
+    assert "pr:482" not in sam_ids and "adr:011" not in sam_ids  # internal: not for contractors
+    dana = entity_facts(_ctx("dana", graph), [PRIVATE])
+    assert [c.id for c in dana] == [PRIVATE]  # allowed through incident-commander

@@ -45,6 +45,9 @@ REL_TYPES = frozenset({
 })  # fmt: skip
 # MENTIONS found in text may point at these kinds of node
 MENTION_TARGETS = frozenset({"Service", "Person", "Decision", "Incident", "PR", "Ticket"})
+# FalkorDB's default query timeout is short (about 1-2 s). A batch of 50 chunks with embeddings can
+# take longer on a small CPU, so every bulk write gets this limit instead.
+WRITE_TIMEOUT_MS = 30_000
 
 
 def check_label(label: str) -> str:
@@ -106,7 +109,7 @@ def load_nodes(graph: GraphLike, nodes: list[dict], batch_size: int = 200) -> di
     for label, rows in sorted(by_label.items()):
         query = f"UNWIND $rows AS row MERGE (n:{label} {{id: row.id}}) SET n += row.props"
         for batch in batches(rows, batch_size):
-            graph.write(query, {"rows": batch})
+            graph.write(query, {"rows": batch}, timeout_ms=WRITE_TIMEOUT_MS)
     return {label: len(rows) for label, rows in by_label.items()}
 
 
@@ -129,7 +132,9 @@ def load_edges(
         )
         for batch in batches(rows, batch_size):
             graph.write(
-                query, {"rows": [{k: e[k] for k in ("src", "dst", "props")} for e in batch]}
+                query,
+                {"rows": [{k: e[k] for k in ("src", "dst", "props")} for e in batch]},
+                timeout_ms=WRITE_TIMEOUT_MS,
             )
         counts[rel_type] = counts.get(rel_type, 0) + len(rows)
     return counts
@@ -154,7 +159,7 @@ def load_chunks(
         for c, v in zip(chunks, vectors, strict=True)
     ]
     for batch in batches(rows, batch_size):
-        graph.write(chunk_query, {"rows": batch})
+        graph.write(chunk_query, {"rows": batch}, timeout_ms=WRITE_TIMEOUT_MS)
     by_label: dict[str, list[dict]] = {}
     for c in chunks:
         by_label.setdefault(check_label(c["src_label"]), []).append(
@@ -166,7 +171,7 @@ def load_chunks(
             f"MATCH (s:{label} {{id: row.src}}) MERGE (c)-[:PART_OF]->(s)"
         )
         for batch in batches(part_rows, 500):
-            graph.write(query, {"rows": batch})
+            graph.write(query, {"rows": batch}, timeout_ms=WRITE_TIMEOUT_MS)
     return len(chunks)
 
 

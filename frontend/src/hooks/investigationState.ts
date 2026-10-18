@@ -3,6 +3,9 @@
 
 import type { Action, EdgeRef, GraphMode, InvestigationSnapshot, Report, RunSummary, StepEvent } from '../api/types'
 
+// Ids that tools return but that are not graph nodes, so the canvas must not draw or zoom to them.
+const NON_GRAPH_PREFIXES = ['action:', 'inv:', 'step:', 'finding:', 'query:']
+
 // ---------------------------------------------------------------- trail items
 
 /** One row in the reasoning trail. `seq` is the SSE sequence number, used as React key. */
@@ -156,7 +159,8 @@ function applyEvent(state: InvestigationState, e: StepEvent): InvestigationState
         cypher: p.cypher,
         ms: p.ms,
         rowCount: p.row_count,
-        nodeIds: p.node_ids,
+        // Only graph nodes can be drawn; ids like action:… are not in the graph.
+        nodeIds: p.node_ids.filter((id) => !NON_GRAPH_PREFIXES.some((x) => id.startsWith(x))),
         edges: p.edges,
         restrictedMatches: p.restricted_matches,
         error: p.error,

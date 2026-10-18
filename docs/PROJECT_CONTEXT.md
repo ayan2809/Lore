@@ -26,9 +26,14 @@ Lore is a hackathon project for **Graph Hacks (WeMakeDevs × FalkorDB, Oct 15–
 ```
 .
 ├── README.md                     # six-question README skeleton (plan section 18)
-├── docker-compose.yml            # falkordb + api (+ caddy on the VM)
-├── Caddyfile
-├── Makefile                      # common commands (see RUNBOOK)
+├── docker-compose.yml            # falkordb + api, for local use only
+├── Makefile                      # common commands (see RUNBOOK), incl. the aws-* targets
+├── infra/                        # AWS deployment (see section 9 and infra/README.md)
+│   ├── cfn/                      # network.yaml, registry.yaml, app.yaml, frontend.yaml (CloudFormation)
+│   ├── deploy.sh                 # deploy / secrets / status / logs / rollback / destroy
+│   ├── buildspec.yml             # CodeBuild recipe for the ARM64 API image
+│   ├── iam/                      # the deploying user's IAM policy
+│   └── README.md                 # beginner guide, cost, security
 ├── .env.example
 ├── docs/
 │   ├── plan.md                   # the product plan (source of intent)
@@ -39,7 +44,8 @@ Lore is a hackathon project for **Graph Hacks (WeMakeDevs × FalkorDB, Oct 15–
 │   ├── PENDING_TASKS.md          # ordered backlog (P0/P1/P2)
 │   ├── HUMAN_REVIEW.md           # decisions/inputs that need Ayan
 │   ├── DECISIONS.md              # design decision log
-│   ├── RUNBOOK.md                # how to operate Lore
+│   ├── RUNBOOK.md                # how to operate Lore (local and AWS)
+│   ├── INFRA_PLAN.md             # the agreed AWS plan (what and why)
 │   ├── hackathon-context.md      # official rules
 │   └── reference/                # offline FalkorDB docs (html is gitignored) + its generator
 ├── backend/
@@ -172,10 +178,38 @@ The session is a signed cookie `lore_session` holding `{persona}`. `POST /api/se
 
 ## 7. Frontend
 
-React + Vite + TS + Tailwind, `react-force-graph-2d`. Panels: persona switcher (top bar), alert list + "▶ Run the 3 AM incident" button, live graph canvas (highlights `node_ids`/`edges` from `tool_result` events, particles on active edges), reasoning trail (agent, reason, Cypher, ms; click to highlight), report card (claims with clickable citations, restricted-match warning, people to contact), actions panel (edit → approve/reject), run summary, Ask-the-brain tab, Graph ON/OFF toggle. The API base comes from `VITE_API_BASE` (default `http://localhost:8000`).
+React + Vite + TS + Tailwind, `react-force-graph-2d`. Panels: persona switcher (top bar), alert list + "▶ Run the 3 AM incident" button, live graph canvas (highlights `node_ids`/`edges` from `tool_result` events, particles on active edges), reasoning trail (agent, reason, Cypher, ms; click to highlight), report card (claims with clickable citations, restricted-match warning, people to contact), actions panel (edit → approve/reject), run summary, Ask-the-brain tab, Graph ON/OFF toggle. The API base comes from `VITE_API_BASE`: unset means `http://localhost:8000`, and an empty value means same origin (the AWS build, where CloudFront serves the page and `/api/*` on one domain).
 
 ## 8. Environment
 
 - Python 3.12+ with **uv** (`cd backend && uv sync`). Node 20+ (`cd frontend && npm install`).
-- FalkorDB via Docker: `docker compose up falkordb` (port 6379, Browser on 3000). **Docker is not installed on Ayan's Mac yet** (see HUMAN_REVIEW).
-- Env vars use the prefix `LORE_` (see `.env.example`).
+- FalkorDB via Docker: `docker compose up falkordb` (port 6379). The image is `falkordb/falkordb-server:v4.18.3`, the same as on AWS (no Browser UI). **Docker is not installed on Ayan's Mac**; `make db-lite` is the substitute locally, and the AWS image is built in CodeBuild.
+- Env vars use the prefix `LORE_` (see `.env.example`). Settings added for the AWS deployment:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LORE_COOKIE_SECURE` | `false` | Adds `Secure` to the session cookie. `true` on AWS (HTTPS only). The cookie is always `HttpOnly; SameSite=Lax` (page and API share one origin there). |
+| `LORE_LOAD_ON_START` | `never` | `if_empty`: at startup, if the graph has no `Service` nodes (or no `Chunk` nodes), load `backend/data` in a background daemon thread with `load_on_start_*` log events. Never blocks startup or `/api/health`. Uses real embeddings unless `LORE_FAKE_EMBEDDINGS=true`; skipped (logged) with no Gemini key. |
+| `LORE_CORS_ORIGINS` | `["http://localhost:5173"]` | `[]` on AWS (same origin, no CORS needed). |
+
+- Rate limit key (`api/ratelimit.py`): `CloudFront-Viewer-Address` (port removed), else the first `X-Forwarded-For` entry, else the peer address. Trustworthy only because the ALB rejects requests lacking the secret `X-Origin-Verify` header.
+- `GraphClient.write(cypher, params, timeout_ms=None)`: optional per-query timeout; the loader passes 30 s on its bulk writes.
+
+## 9. Deployment architecture (AWS, ap-south-1)
+
+Full plan: `docs/INFRA_PLAN.md`. Beginner guide: `infra/README.md`. Commands: `RUNBOOK.md` section 8.
+
+```
+Browser --HTTPS--> CloudFront (default dxxxx.cloudfront.net domain, no certificate)
+   |-- /*      -> S3 bucket lore-web-<account> (React build, private, Origin Access Control)
+   '-- /api/*  -> ALB lore-alb (HTTP :80; only CloudFront's IP list may connect; forwards only if header
+                  X-Origin-Verify matches, else 403; idle timeout 300 s for SSE)
+                    -> ECS Fargate task (ARM64, 1 vCPU / 2 GB, exactly one)
+                         api container (uvicorn, 1 worker)  --localhost:6379, password-->  falkordb container
+                                                                                              '-- EFS (encrypted, access point /falkordb)
+```
+
+- Four CloudFormation stacks: `lore-network`, `lore-registry`, `lore-app`, `lore-frontend` (`infra/cfn/`), deployed by `infra/deploy.sh`.
+- The API image is built by CodeBuild (ARM64) from a zip of `backend/` and pushed to ECR `lore-api` (`:<git-sha>` and `:latest`).
+- Secrets Manager: `lore/app` (5 keys, injected into the containers) and `lore/origin-verify` (CloudFront-to-ALB header value).
+- Why this shape: D-14 (Fargate, not Lambda), D-15 (single task, FalkorDB sidecar, EFS), D-16 (default CloudFront domain, HTTP hop guarded by an IP list and a secret header).
