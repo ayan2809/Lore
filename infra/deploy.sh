@@ -272,7 +272,8 @@ build_image() {
   rsync -a \
     --exclude '.venv/' --exclude '__pycache__/' --exclude '*.py[cod]' --exclude '.pytest_cache/' \
     --exclude '.ruff_cache/' --exclude '.mypy_cache/' --exclude '*.egg-info/' --exclude 'tests/' \
-    --exclude '.env' --exclude '.env.*' --exclude 'eval/report.md' --exclude 'replays/*.jsonl' \
+    --exclude '.env' --exclude '.env.*' --exclude 'eval/report.md' \
+    --include 'replays/story_*.jsonl' --exclude 'replays/*.jsonl' \
     "$ROOT_DIR/backend/" "$stage/"
   cp "$ROOT_DIR/infra/buildspec.yml" "$stage/buildspec.yml"
   (cd "$stage" && zip -qr "$zipfile" .)

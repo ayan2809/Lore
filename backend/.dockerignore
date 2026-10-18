@@ -10,3 +10,5 @@ __pycache__/
 tests/
 eval/report.md
 replays/*.jsonl
+# ...but ship the recorded golden runs: they are the fallback after the daily live-run cap
+!replays/story_*.jsonl
