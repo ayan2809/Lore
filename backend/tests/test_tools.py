@@ -611,3 +611,11 @@ def test_graph_never_receives_a_write(make_ctx, fake_graph):
     assert isinstance(fake_graph, FakeGraph)
     with pytest.raises(AssertionError):
         fake_graph.write("CREATE (n)")
+
+
+def test_a_missing_reason_does_not_fail_the_tool(make_ctx, fake_graph):
+    """FIX_LOG F-17: small models sometimes drop `reason`; the call still runs."""
+    from lore.tools import NO_REASON
+
+    result = call_tool(make_ctx("arjun"), "service_criticality", {"top": 3})
+    assert result.error is None and result.reason == NO_REASON

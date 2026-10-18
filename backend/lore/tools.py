@@ -39,6 +39,9 @@ class ToolArgs(BaseModel):
     reason: str = Field(description="One sentence: why you are calling this tool right now.")
 
 
+NO_REASON = "(the model gave no reason for this call)"
+
+
 @dataclass
 class ToolSpec:
     name: str
@@ -80,6 +83,11 @@ def call_tool(ctx: ToolContext, name: str, raw_args: dict[str, Any]) -> ToolResu
     if ctx.mode not in spec.modes:
         return ToolResult(tool=name, reason="", error=f"tool not available in {ctx.mode} mode")
     raw_args = {k: v for k, v in raw_args.items() if k not in ("viewer", "open_levels")}
+    if not str(raw_args.get("reason") or "").strip():
+        # The model is told `reason` is required, but small models sometimes drop it. Run the
+        # tool anyway instead of failing the step (FIX_LOG F-17); the trail shows NO_REASON.
+        # (No log line: tools also run inside the MCP server, whose stdout is the protocol.)
+        raw_args["reason"] = NO_REASON
     try:
         args = spec.args_model.model_validate(raw_args)
     except Exception as exc:  # pydantic.ValidationError
