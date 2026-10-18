@@ -4,7 +4,7 @@ Lore loads a fictional food-delivery company ("Kettle") into one **FalkorDB** gr
 
 Built solo by Ayan for **Graph Hacks** (WeMakeDevs x FalkorDB), Oct 15-18 2026.
 
-**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** see [Live link and video](#live-link-and-video)
+**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** https://youtu.be/-pN2LUVsix4
 
 ![The Lore investigation screen: the reasoning trail on the left, the permission-filtered company graph with the evidence path lit in the middle, and the cited root-cause report with who to page on the right](docs/img/investigation.png)
 
@@ -270,7 +270,7 @@ All three tracks.
 ## Live link and video
 
 - Live demo: **https://d1cu7fzoa0v5wz.cloudfront.net** (AWS: CloudFront + S3 for the page, ECS Fargate for the API with FalkorDB beside it on EFS; see [infra/README.md](infra/README.md)). Live runs call Gemini; after 100 live runs in a day the API plays back a recorded run instead, and the UI marks it "REPLAY". Tick "Replay a recorded run" to watch one without using a live run.
-- Demo video (about 3 minutes, business problem first, with one failure case): **TODO**
+- Demo video (4:51, with subtitles): **https://youtu.be/-pN2LUVsix4**. The narration was generated with Gemini TTS from my script; the investigations shown are recorded runs, and the Ask the brain answers are live.
 - Blog post: **TODO** (optional side prize)
 
 ## Project docs
@@ -296,7 +296,7 @@ All three tracks.
 
 Hackathon rules require disclosing AI coding assistants. The story below is in my own words.
 
-**Tools used:** Claude Code (Anthropic) wrote most of the code and docs in this repo: the skeleton on Oct 16, then the fixes, the AWS infrastructure, the UI changes and the docs, as I directed, reviewed and tested them. The UI screens and diagrams were designed with Claude's `/design` skill. Gemini is used at runtime by the product itself (agents, extraction, embeddings) and generated the synthetic Slack, ticket and ADR wording.
+**Tools used:** Claude Code (Anthropic) wrote most of the code and docs in this repo: the skeleton on Oct 16, then the fixes, the AWS infrastructure, the UI changes and the docs, as I directed, reviewed and tested them. The UI screens and diagrams were designed with Claude's `/design` skill. Gemini is used at runtime by the product itself (agents, extraction, embeddings) and generated the synthetic Slack, ticket and ADR wording. The demo video was recorded and assembled with Claude Code's help, and its narration was generated with Gemini TTS from my script.
 
 **Planning (before Oct 15):** the plan (`docs/plan.md`) was drafted with Claude in planning sessions at Ayan's request: Ayan set the constraints (solo, Python + React + FalkorDB + FastAPI + Gemini, demoable in 4 days, FDE portfolio framing) and asked Claude to propose the project; Claude proposed the domain, the "Lore" concept, the discovery brief numbers, the permission model and the eval design.
 
