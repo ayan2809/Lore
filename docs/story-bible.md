@@ -3,7 +3,7 @@
 > **Status: AI-drafted on Oct 16 from `plan.md` sections 0, 5, 6 and 7. Ayan must review it** (see `HUMAN_REVIEW.md`, item R-01).
 > This file is the **single source of truth** for the fake company. The data generator (`backend/lore/data_gen/`), the golden questions (`backend/eval/golden.jsonl`) and the demo script must agree with it. If you change a fact here, regenerate the data and re-run the evals.
 
-All names are fictional. All times are **IST (+05:30)** and are stored in the graph as **Unix seconds** (integers).
+All names are fictional. Every date in this file is a date in Kettle's story (the company's past, up to the demo incident), not a date of work on this project. All times are **IST (+05:30)** and are stored in the graph as **Unix seconds** (integers).
 
 ---
 

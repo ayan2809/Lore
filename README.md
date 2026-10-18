@@ -4,9 +4,13 @@ Lore loads a fictional food-delivery company ("Kettle") into one **FalkorDB** gr
 
 Built solo by Ayan for **Graph Hacks** (WeMakeDevs x FalkorDB), Oct 15-18 2026.
 
-> **Status: skeleton.** Items marked **TODO** are placeholders. Results, links and the video are filled in only when they exist. No number in this README is invented; evaluation numbers come from `backend/eval/report.md`.
+**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** see [Live link and video](#live-link-and-video)
 
-Jump to: [Quickstart](#quickstart) | [Tracks](#tracks-entered) | [Live link and video](#live-link-and-video) | [AI-assistant disclosure](#ai-assistant-disclosure)
+![The Lore investigation screen: the reasoning trail on the left, the permission-filtered company graph with the evidence path lit in the middle, and the cited root-cause report with who to page on the right](docs/img/investigation.png)
+
+Every number in this README comes from a real run or from the eval reports in `backend/eval/`. Kettle is fictional and all data is synthetic; every date in the data is a date in Kettle's story, not a project date.
+
+Jump to: [Quickstart](#quickstart) | [Tracks](#tracks-entered) | [Live link and video](#live-link-and-video) | [Design decisions and Q&A](docs/DESIGN_QA.md) | [AI-assistant disclosure](#ai-assistant-disclosure)
 
 ---
 
@@ -124,7 +128,22 @@ Full schema: [docs/plan.md](docs/plan.md) section 5, story: [docs/story-bible.md
 
 ### Documented Cypher
 
-Every query the system runs lives in its own documented file: **[backend/lore/queries/](backend/lore/queries/)** (`*.cypher`). TODO: confirm the folder is complete and each file has a header comment explaining what it does and why, once the backend is finished.
+Every query the agents, the API and the memory module run lives in its own file in **[backend/lore/queries/](backend/lore/queries/)** (42 `*.cypher` files). Each starts with a comment saying what it does, why, and its parameters. The loader's bulk `MERGE` statements and the index setup are in [`backend/lore/loader/`](backend/lore/loader/).
+
+The ones that carry the demo:
+
+| Query | What it does | FalkorDB feature |
+|---|---|---|
+| [`recent_changes`](backend/lore/queries/recent_changes.cypher) | Deploys and PRs in the failing service and everything it depends on (up to 3 hops), with the code modules each PR modified | variable-length `DEPENDS_ON*0..3` |
+| [`evidence_path`](backend/lore/queries/evidence_path.cypher) | Shortest chain alert → service → dependency → deploy → PR, over four relationship types | `algo.SPpaths` (falls back to `shortestPath`) |
+| [`blast_radius`](backend/lore/queries/blast_radius.cypher) | Which services depend on the failing one (up to 4 hops back), with their tier; severity is set from this by a rule in code | reverse `DEPENDS_ON` traversal |
+| [`pagerank_services`](backend/lore/queries/pagerank_services.cypher) | Which services the rest of the company leans on most | `algo.pageRank` |
+| [`vector_search_permitted`](backend/lore/queries/vector_search_permitted.cypher) | Search by meaning, keeping only sources the viewer may see | vector index `db.idx.vector.queryNodes` + permission path |
+| [`fulltext_search_permitted`](backend/lore/queries/fulltext_search_permitted.cypher) | Keyword search with the same permission rule | full-text index |
+| [`trace_decision`](backend/lore/queries/trace_decision.cypher) | From a service or ADR to the decision, the discussion behind it and what it superseded | `IMPLEMENTS`, `DISCUSSED_IN`, `SUPERSEDES` |
+| [`who_knows`](backend/lore/queries/who_knows.cypher) | The owner (current `MEMBER_OF` only, so people who moved teams drop out) and hands-on experts, scored from PRs authored and reviewed and incidents resolved | aggregation over `AUTHORED`, `REVIEWED`, `RESOLVED_BY` |
+| [`restricted_match_count`](backend/lore/queries/restricted_match_count.cypher) | How many relevant sources the viewer may *not* see, and which team to ask; never their content | the permission test inverted |
+| [`memory_*`](backend/lore/queries/) | Investigations, steps, findings and playbooks written back into the graph | episodic and procedural memory |
 
 ### Identity, retries and failures
 
@@ -136,33 +155,38 @@ Every query the system runs lives in its own documented file: **[backend/lore/qu
 
 ### Failure cases
 
-Failures are built in on purpose. The "what the system did" column is filled in from real runs; TODO until then.
+Failures are built in on purpose. The last column says what happened and where it is checked.
 
-| Failure | How it is caused | What Lore should do (design) | What the system did (TODO) |
+| Failure | How it is caused | What Lore does | What happened (evidence) |
 |---|---|---|---|
-| Out-of-date or conflicting source | Story D in the story bible | Rank sources by rule, answer from the most trustworthy, show both with a "conflict" tag | TODO |
-| Model returns badly formatted output | Test that feeds broken output | Reject with Pydantic, retry once with the error, otherwise show raw findings with a warning | TODO |
-| A tool call times out | Artificial delay on a query or the GitHub API | Give up after a set time, back off and retry, mark the step failed, continue with other evidence | TODO |
-| User lacks permission | Sam asks about the security incident | Refuse with the restricted warning and who to ask; the trace shows nothing restricted was fetched | TODO |
-| Request breaks policy | "Post the security details to #general", "Roll back prod now" | Block in code with the reason; a rollback is only ever a proposal | TODO |
-| Gemini is down or out of quota | Revoke the API key during a test run | Replay mode, clearly labelled | TODO |
+| Out-of-date or conflicting source | Story D: an old wiki says "60 s TTL is fine", ADR-011 says "≥ 300 s" | Rank sources by rule (ADR > runbook > ticket > Slack; `SUPERSEDES` wins), answer from the best one, show both with a "conflict" tag | Unit tests `test_superseded_source_is_tagged_conflict_and_both_are_shown`, `test_supersedes_wins_even_against_a_higher_rank`. Eval: stale-source recall@5 76% with the graph vs 29% without |
+| Model returns badly formatted or uncited output | Tests feed broken output | Parse into Pydantic; every claim must cite an id a tool returned in this run; one retry with the problems listed, then invalid claims are dropped and flagged | Tests `test_uncited_claim_gets_one_retry_with_the_problems`, `test_claims_still_invalid_after_retry_are_dropped` |
+| A model or tool call fails or times out | Timeouts, 429/5xx from Gemini, an agent raising | Gemini calls time out and retry with backoff (1 s, 2 s, 4 s); a failed tool returns an error step and the run continues with other evidence | Tests `test_supervisor_survives_an_agent_failure`, `test_gemini_does_not_retry_a_bad_request`; `GRAPH.RO_QUERY` runs with a query timeout |
+| User lacks permission | Sam (contractor) runs the incident | No PRs or deploys reach him; the report says restricted sources exist and who to ask | Live: Sam gets no root cause, by design. Leak test: 0 restricted ids across 4 personas × 63 probes |
+| Request breaks policy | Dana's draft GitHub issue cites the private `#pricing-private` thread, and the repo is public; "roll back prod now" | Blocked in code with the reason; a rollback is only ever a proposal | Live: the issue was blocked with the reason (FIX_LOG F-09); tests `test_blocked_requests`, `test_post_blocked_when_a_member_cannot_see_a_cited_source` |
+| Gemini is down or the daily budget is spent | More than 100 live runs in a day, or no key | Replay a recorded run of the same alert, persona and mode, clearly labelled "replay" | The API switches to replay at the daily cap (`daily_live_limit`); Graph OFF never replays a Graph ON recording (test `test_graph_off_replay_never_falls_back_to_a_graph_on_recording`) |
 
 ## 5. How did you evaluate it?
 
-A fixed set of 50+ golden questions (`backend/eval/golden.jsonl`) across five types (easy lookup, cross-source synthesis, conflicting sources, out-of-date information, should refuse), asked as different personas. Each layer is measured separately. Scoring is deterministic (key facts and source ids present), not an AI judge. Run it with `make eval`; it writes `backend/eval/report.md`.
+A fixed set of 59 golden questions (`backend/eval/golden.jsonl`) across five types (easy lookup, cross-source synthesis, conflicting sources, out-of-date information, should refuse), asked as different personas. Each layer is measured separately. Scoring is deterministic (key facts and source ids present), not an AI judge. Run it with `make eval`; it writes [`backend/eval/report.md`](backend/eval/report.md) and [`report_generation.md`](backend/eval/report_generation.md).
 
-**TODO: fill this table from `backend/eval/report.md` after `make eval`. Do not type numbers that are not in the report.**
+**Graph ON vs Graph OFF.** Graph OFF is the baseline: the same agents and models, but they can only search text by meaning. It still runs on FalkorDB (its vector index), with the same permission check in Cypher, so it measures what the graph's *links* add. Nothing in Lore runs without FalkorDB.
 
 | Layer | Measure | Target | Graph ON | Graph OFF (vector only) |
 |---|---|---|---|---|
-| Retrieval | Expected sources in top 5 (recall); forbidden ids returned | High recall; 0 forbidden | TODO | TODO |
-| Generation | Claims with a valid source | at least 90% | TODO | TODO |
-| Generation | Key facts present (`must_include`) | TODO | TODO | TODO |
-| Generation | Correct refusals on "should refuse" questions | all | TODO | TODO |
-| Permissions | Restricted ids in any persona's results or citations | **0** (automatic pytest test) | TODO | TODO |
-| Investigations | Root cause correct (5 runs x 3 scenarios), red herring rejected | TODO | TODO | TODO |
-| Investigations | Time to root cause | under 3 min | TODO | TODO |
-| Investigations | Steps and cost per run | TODO | TODO | TODO |
+| Retrieval | Expected sources in the top 5 (recall@5) | high | **75%** | 38% |
+| Retrieval | Plain lookups ("who reviewed PR 482?") recall@5 | high | **93%** | 11% |
+| Generation (Ask) | Answers with the key facts | high | **71%** | 43% |
+| Generation (Ask) | Claims with a valid source | at least 90% | 67% (below target) | 49% |
+| Generation (Ask) | Correct refusals on "should refuse" questions | all | 93% | 66% |
+| Permissions | Restricted ids returned, 4 personas × 63 probes | **0** | **0** | **0** |
+| Investigation, Story A (live, 6 runs as Arjun) | Root cause PR #482; red herring PR #479 rejected | every run | 6/6; 6/6 | see below |
+| Investigation, Story A | Time to root cause | under 3 min | 42–54 s (whole run 50–60 s) | 102 s (one recorded run) |
+| Investigation, Story A | Cost per run | low | $0.022–0.027 | $0.091 (one recorded run) |
+
+On Story A, Graph OFF also names PR #482, because the PR's own text mentions the cache TTL. But it needs a second Investigator pass, never examines the red herring, and gives no severity, no evidence path and nobody to page. Learned playbooks make the next similar incident cheaper: on Story B the Investigator went from 8 to 4 steps and the time to root cause from 50 s to 39 s. Details and every fix found while testing: [docs/FIX_LOG.md](docs/FIX_LOG.md).
+
+![Graph ON vs Graph OFF on the same alert: a table comparing root cause, suspects ruled out, severity, evidence path, who to page, tool calls, time to root cause and cost](docs/img/compare.png)
 
 Hand-checked answers: TODO (about 10 checked by hand; record how many matched the automatic score).
 
@@ -210,7 +234,7 @@ All three tracks.
 
 ## Live link and video
 
-- Live demo: **TODO** (frontend on Vercel, API on a VM; the link goes here, with the replay fallback noted).
+- Live demo: **https://d1cu7fzoa0v5wz.cloudfront.net** (AWS: CloudFront + S3 for the page, ECS Fargate for the API with FalkorDB beside it on EFS; see [infra/README.md](infra/README.md)). Live runs call Gemini; after 100 live runs in a day the API plays back a recorded run instead, and the UI marks it "REPLAY". Tick "Replay a recorded run" to watch one without using a live run.
 - Demo video (about 3 minutes, business problem first, with one failure case): **TODO**
 - Blog post: **TODO** (optional side prize)
 
@@ -223,6 +247,15 @@ All three tracks.
 | [docs/story-bible.md](docs/story-bible.md) | The fake company; single source for data and evals |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | How to run, reset, deploy and troubleshoot |
 | [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Repo layout, API and module contracts |
+| [docs/DESIGN_QA.md](docs/DESIGN_QA.md) | The main design decisions, and answers to the questions a reviewer is likely to ask |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | The decision log, with the alternatives rejected |
+| [docs/FIX_LOG.md](docs/FIX_LOG.md) | Every bug found in live testing, why it happened, the fix and how it was verified |
+| [backend/eval/](backend/eval/) | Golden questions, the eval harness and its reports |
+| [infra/README.md](infra/README.md) | The AWS deployment |
+
+## License
+
+[MIT](LICENSE)
 
 ## AI-assistant disclosure
 
