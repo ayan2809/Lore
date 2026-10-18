@@ -144,8 +144,15 @@ async def _retrieve(
     # What the graph itself says about the things the question names (FIX_LOG F-06).
     named = await _entities_named(ctx, question)
     facts = await asyncio.to_thread(entity_facts, ctx, named)
-    teams = sorted({i for c in facts if c.label == "Service" for i in c.related_ids
-                    if i.startswith("team:") and i not in named})
+    teams = sorted(
+        {
+            i
+            for c in facts
+            if c.label == "Service"
+            for i in c.related_ids
+            if i.startswith("team:") and i not in named
+        }
+    )
     if teams:  # "who owns pricing?" needs the owning team (and its lead) too
         facts += await asyncio.to_thread(entity_facts, ctx, teams)
     return found + facts

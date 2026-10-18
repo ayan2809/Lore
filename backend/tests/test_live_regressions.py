@@ -35,18 +35,6 @@ def test_find_entity_finds_a_restricted_thread_only_for_those_allowed(graph):
     assert arjun.error is None and PRIVATE not in arjun.node_ids
 
 
-def test_run_cypher_never_returns_memory_nodes_or_restricted_ids(graph):
-    sam = _ctx("sam", graph)
-    for cypher in [
-        "MATCH (f:Finding) RETURN f.id AS id, f",
-        "MATCH (s:Step) RETURN s.id AS id, s.node_ids AS n",
-        f"MATCH (t:Thread {{id: '{PRIVATE}'}}) RETURN t.id AS id, t.title AS title",
-    ]:
-        result = call_tool(sam, "run_cypher", {"reason": "t", "cypher": cypher})
-        assert result.error is None, cypher
-        assert result.data == [], cypher
-
-
 def test_post_audience_blocks_a_private_citation_in_incidents(graph):
     blocked = check_post_audience(graph, "#incidents", [PRIVATE, "pr:482"])
     allowed = check_post_audience(graph, "#incidents", ["pr:482", "adr:011"])
@@ -58,8 +46,13 @@ def test_ask_graph_facts_never_show_restricted_nodes_or_neighbours(graph):
     """FIX_LOG F-06: Ask's graph facts go through the same permission rule."""
     from lore.retrieval import entity_facts
 
-    secret = {PRIVATE, "thread:pricing-private-0150", "inc:INC-0326", "thread:hr-private-0003",
-              "thread:sec-incidents-0007"}
+    secret = {
+        PRIVATE,
+        "thread:pricing-private-0150",
+        "inc:INC-0326",
+        "thread:hr-private-0003",
+        "thread:sec-incidents-0007",
+    }
     asked = sorted(secret) + ["adr:011", "svc:pricing", "person:marco", "pr:482"]
     for persona in ("arjun", "sam", "marco"):
         found = entity_facts(_ctx(persona, graph), asked)

@@ -47,9 +47,11 @@ async def run_investigation(
     graph: GraphLike,
     emit: Emit,
     settings: Settings | None = None,
+    investigation_id: str | None = None,
 ) -> tuple[Report, RunSummary]:
     settings = settings or get_settings()
-    inv_id = f"inv:{uuid.uuid4().hex[:12]}"
+    # The API passes its run id, so the stream, the Investigation node and feedback share one id.
+    inv_id = investigation_id or f"inv:{uuid.uuid4().hex[:12]}"
     ctx = ToolContext(viewer=viewer, graph=graph, mode=mode, investigation_id=inv_id)
     bb = Blackboard(inv_id, graph, settings, RunMetrics(inv_id))
 
@@ -239,8 +241,10 @@ async def _people_by_rule(
         known = await run_tool(
             "supervisor",
             "who_knows",
-            {"reason": f"Pick who to contact for {service}, where the root cause landed.",
-             "service": service},
+            {
+                "reason": f"Pick who to contact for {service}, where the root cause landed.",
+                "service": service,
+            },
             ctx,
             emit,
             bb,

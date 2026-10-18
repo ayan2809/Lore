@@ -27,7 +27,6 @@ MAX_RUNS_KEPT = 200
 class Run:
     def __init__(self, viewer_id: str, alert_id: str, mode: str, replay_mode: bool):
         self.id = f"inv:{uuid.uuid4().hex[:10]}"
-        self.graph_id: str | None = None  # id the supervisor used for its Investigation node
         self.viewer_id = viewer_id
         self.alert_id = alert_id
         self.mode = mode
@@ -44,8 +43,7 @@ class Run:
     async def emit(self, event: StepEvent) -> None:
         """The `emit` callable handed to the supervisor (and to replay.play)."""
         if event.investigation_id != self.id:
-            # The supervisor may create its own id. The client only ever sees the API's id.
-            self.graph_id = self.graph_id or event.investigation_id
+            # Every producer is handed self.id; this only guards one that ignores it.
             event = event.model_copy(update={"investigation_id": self.id})
         if event.type == "report":
             self.report = Report.model_validate(event.payload)
@@ -61,8 +59,14 @@ class Run:
     async def push(self, type_: str, payload: dict[str, Any], agent: str | None = None) -> None:
         """Emit an event created by the API itself (errors, fallback report/done)."""
         await self.emit(
-            StepEvent(type=type_, investigation_id=self.id, seq=len(self.events), ts=time.time(),
-                      agent=agent, payload=payload)
+            StepEvent(
+                type=type_,
+                investigation_id=self.id,
+                seq=len(self.events),
+                ts=time.time(),
+                agent=agent,
+                payload=payload,
+            )
         )
 
     def _adopt_action(self, action_id: str | None) -> None:
@@ -125,8 +129,16 @@ class RunRegistry:
         supervisor = self.supervisor or _real_supervisor
         try:
             report, summary = await asyncio.wait_for(
-                supervisor(run.alert_id, viewer, mode=run.mode, llm=llm, graph=graph,
-                           emit=run.emit, settings=settings),
+                supervisor(
+                    run.alert_id,
+                    viewer,
+                    mode=run.mode,
+                    llm=llm,
+                    graph=graph,
+                    emit=run.emit,
+                    settings=settings,
+                    investigation_id=run.id,
+                ),
                 RUN_TIMEOUT_S,
             )
             if run.summary is None:  # the supervisor did not emit its own final events
@@ -141,11 +153,14 @@ class RunRegistry:
     async def _run_replay(self, run: Run, path: Path | None, speed: float) -> None:
         try:
             if path is None:
-                await run.push("error", {
-                    "message": f"No recorded {'Graph OFF ' if run.mode == 'vector' else ''}"
-                    f"run for alert {run.alert_id} and this persona.",
-                    "recoverable": False,
-                })
+                await run.push(
+                    "error",
+                    {
+                        "message": f"No recorded {'Graph OFF ' if run.mode == 'vector' else ''}"
+                        f"run for alert {run.alert_id} and this persona.",
+                        "recoverable": False,
+                    },
+                )
             else:
                 await replay.play(path, run.emit, speed, investigation_id=run.id)
         except Exception as exc:
@@ -158,8 +173,10 @@ class RunRegistry:
 
     async def _fail(self, run: Run, exc: Exception) -> None:
         log_event(event="run_failed", investigation_id=run.id, error=repr(exc))
-        await run.push("error", {"message": f"Investigation failed ({type(exc).__name__}).",
-                                 "recoverable": False})
+        await run.push(
+            "error",
+            {"message": f"Investigation failed ({type(exc).__name__}).", "recoverable": False},
+        )
         if run.summary is None:
             empty = RunSummary(investigation_id=run.id, replay=run.replay)
             await run.push("done", empty.model_dump())
@@ -181,5 +198,8 @@ def get_registry() -> RunRegistry:
 
 def sse_message(event: StepEvent) -> dict[str, str]:
     """Shape sse-starlette expects: `event:` is the StepEvent type, `data:` the JSON."""
-    return {"event": event.type, "data": json.dumps(event.model_dump(), default=str),
-            "id": str(event.seq)}
+    return {
+        "event": event.type,
+        "data": json.dumps(event.model_dump(), default=str),
+        "id": str(event.seq),
+    }

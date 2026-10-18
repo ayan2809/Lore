@@ -2,7 +2,8 @@
 //
 // Same vector search as vector_search_permitted.cypher, but with the permission test turned
 // around (NOT): we keep only the chunks whose source the viewer cannot see, and only those
-// close enough in meaning to count as a real match ($max_distance; tune on Day 1).
+// close enough in meaning to count as a real match ($max_distance, from
+// retrieval.RESTRICTED_MAX_DISTANCE).
 // We return counts per owning team and the team lead's name, never any content, so the app
 // can say "1 restricted source matched; ask the Pricing team (Rahul)".
 //

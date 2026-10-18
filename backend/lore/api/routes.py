@@ -47,11 +47,20 @@ router = APIRouter(prefix="/api")
 
 # Shown when the graph is down, so the UI can still offer the replay demo.
 FALLBACK_ALERTS = [
-    {"id": "A-3001", "name": "checkout p99 latency > 3s", "symptom": "checkout p99 latency > 3s",
-     "service": "svc:checkout", "started_at": 1791927000},
-    {"id": "A-3002", "name": "dispatch assignment latency > 5s",
-     "symptom": "dispatch assignment latency > 5s", "service": "svc:dispatch",
-     "started_at": 1792532400},
+    {
+        "id": "A-3001",
+        "name": "checkout p99 latency > 3s",
+        "symptom": "checkout p99 latency > 3s",
+        "service": "svc:checkout",
+        "started_at": 1791927000,
+    },
+    {
+        "id": "A-3002",
+        "name": "dispatch assignment latency > 5s",
+        "symptom": "dispatch assignment latency > 5s",
+        "service": "svc:dispatch",
+        "started_at": 1792532400,
+    },
 ]
 
 
@@ -128,9 +137,13 @@ async def health(
             falkordb = "empty key" in str(exc).lower()
     gemini = bool(settings.gemini_api_key)
     budget = request.app.state.budget
-    return {"status": "ok", "falkordb": falkordb, "gemini": gemini,
-            "replay": settings.force_replay or not gemini,
-            "live_runs_left_today": budget.remaining("investigation", settings.live_runs_per_day)}
+    return {
+        "status": "ok",
+        "falkordb": falkordb,
+        "gemini": gemini,
+        "replay": settings.force_replay or not gemini,
+        "live_runs_left_today": budget.remaining("investigation", settings.live_runs_per_day),
+    }
 
 
 @router.get("/personas")
@@ -221,8 +234,15 @@ async def start_investigation(
     if not use_replay:
         deps.require_graph(graph)
     run = registry.create(viewer.id, body.alert_id, body.mode, use_replay)
-    log_event(event="investigation_start", investigation_id=run.id, viewer=viewer.id,
-              alert_id=body.alert_id, mode=body.mode, replay=use_replay, reason=replay_reason)
+    log_event(
+        event="investigation_start",
+        investigation_id=run.id,
+        viewer=viewer.id,
+        alert_id=body.alert_id,
+        mode=body.mode,
+        replay=use_replay,
+        reason=replay_reason,
+    )
     if use_replay:
         registry.start_replay(
             run, replay.find_replay(body.alert_id, persona, settings, mode=body.mode)
@@ -277,7 +297,7 @@ async def feedback(
     playbook_id = await _maybe_await(
         memory.apply_feedback(
             deps.require_graph(graph),
-            investigation_id=run.graph_id or run.id,
+            investigation_id=run.id,
             confirmed=body.confirmed,
             llm=llm,
         )
@@ -301,19 +321,33 @@ async def ask_the_brain(
 
     decision = policy.check_request(body.question)
     if not decision.allowed:  # rule-based block; the reason is shown to the user
-        return AskAnswer(question=body.question, viewer_id=viewer.id, mode=body.mode,
-                         refused=True, claims=[Claim(text=decision.reason or "Blocked by policy.")])
+        return AskAnswer(
+            question=body.question,
+            viewer_id=viewer.id,
+            mode=body.mode,
+            refused=True,
+            claims=[Claim(text=decision.reason or "Blocked by policy.")],
+        )
     if llm is None:
         raise HTTPException(503, "Gemini is not configured, so Ask is unavailable (no replay).")
     if not request.app.state.budget.take("ask", settings.live_asks_per_day):
-        raise HTTPException(429, "Today's limit of live questions is used up (it protects the "
-                                 "Gemini bill on this public demo). Please try again tomorrow.")
+        raise HTTPException(
+            429,
+            "Today's limit of live questions is used up (it protects the "
+            "Gemini bill on this public demo). Please try again tomorrow.",
+        )
     with Timer() as timer:
         answer = await ask.ask(
             body.question, viewer, mode=body.mode, llm=llm, graph=deps.require_graph(graph)
         )
-    log_event(event="ask", viewer=viewer.id, mode=body.mode, ms=round(timer.ms, 1),
-              refused=answer.refused, cited=[s.id for s in answer.sources])
+    log_event(
+        event="ask",
+        viewer=viewer.id,
+        mode=body.mode,
+        ms=round(timer.ms, 1),
+        refused=answer.refused,
+        cited=[s.id for s in answer.sources],
+    )
     return answer
 
 
@@ -362,18 +396,28 @@ async def _render_action(action: Action, run, graph: GraphLike | None, lore_url:
     if report is None or graph is None or action.kind not in ("slack_post", "github_issue"):
         return None
     try:
-        ids = [run.alert_id, *action.cited_ids, *report.evidence_path,
-               report.root_cause or "", report.people.page or "", *report.people.consult,
-               *report.people.notify, *[i for c in report.claims + report.rejected_suspects
-                                       for i in c.citations], *fmt._ID.findall(action.text)]
+        ids = [
+            run.alert_id,
+            *action.cited_ids,
+            *report.evidence_path,
+            report.root_cause or "",
+            report.people.page or "",
+            *report.people.consult,
+            *report.people.notify,
+            *[i for c in report.claims + report.rejected_suspects for i in c.citations],
+            *fmt._ID.findall(action.text),
+        ]
         alert_id = run.alert_id if ":" in run.alert_id else f"alert:{run.alert_id}"
         ids.append(alert_id)
         names = await asyncio.to_thread(fmt.lookup_names, graph, [i for i in ids if i])
         if action.kind == "slack_post":
-            issue_url = next((a.result_url for a in run.actions()
-                              if a.kind == "github_issue" and a.result_url), None)
-            return fmt.build_message(report, alert_id, action.text, names,
-                                     lore_url=lore_url, issue_url=issue_url)
+            issue_url = next(
+                (a.result_url for a in run.actions() if a.kind == "github_issue" and a.result_url),
+                None,
+            )
+            return fmt.build_message(
+                report, alert_id, action.text, names, lore_url=lore_url, issue_url=issue_url
+            )
         body = fmt.humanize(action.text, names)
         if lore_url:
             body += f"\n\n---\nDrafted by [Lore]({lore_url}) and approved by a human."
@@ -394,8 +438,9 @@ async def approve_action(
     registry: RunRegistry = Depends(runs.get_registry),
 ) -> Action:
     action = _own_action(registry, action_id, viewer)
-    rendered = await _render_action(action, registry.get(action.investigation_id), graph,
-                                    _public_url(request, settings))
+    rendered = await _render_action(
+        action, registry.get(action.investigation_id), graph, _public_url(request, settings)
+    )
     try:
         # graph may be None: the policy check then fails closed and the post is blocked
         return await actions.approve(action_id, graph, settings, rendered)

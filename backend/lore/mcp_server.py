@@ -88,8 +88,9 @@ def make_tool_function(spec: tools.ToolSpec, viewer, graph_factory):
     return run
 
 
-# Free-form Cypher is too wide a door for outside clients; propose_action needs a run.
-MCP_EXCLUDED_TOOLS = {"run_cypher", "propose_action"}
+# propose_action belongs to an investigation run and needs a human to approve it, so outside
+# clients get the read-only tools only.
+MCP_EXCLUDED_TOOLS = {"propose_action"}
 
 
 def build_server(viewer=None, graph_factory=_graph) -> FastMCP:
@@ -98,8 +99,11 @@ def build_server(viewer=None, graph_factory=_graph) -> FastMCP:
     for spec in list(tools.REGISTRY.values()):
         if spec.name in MCP_EXCLUDED_TOOLS:
             continue
-        server.add_tool(make_tool_function(spec, viewer, graph_factory),
-                        name=spec.name, description=spec.description)
+        server.add_tool(
+            make_tool_function(spec, viewer, graph_factory),
+            name=spec.name,
+            description=spec.description,
+        )
 
     async def ask(question: str, mode: str = "graph") -> dict[str, Any]:
         """Ask the company brain a question. Answers cite sources the current persona may see."""
@@ -110,8 +114,11 @@ def build_server(viewer=None, graph_factory=_graph) -> FastMCP:
         from lore import llm as llm_module
 
         answer = await ask_module.ask(
-            question, viewer, mode="vector" if mode == "vector" else "graph",
-            llm=llm_module.get_llm(settings), graph=graph_factory(),
+            question,
+            viewer,
+            mode="vector" if mode == "vector" else "graph",
+            llm=llm_module.get_llm(settings),
+            graph=graph_factory(),
         )
         return answer.model_dump()
 

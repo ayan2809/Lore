@@ -101,8 +101,9 @@ def score_generation(case: dict[str, Any], answer: dict[str, Any]) -> dict[str, 
     }
 
 
-def score_investigation(case: dict[str, Any], report: dict[str, Any] | None,
-                        summary: dict[str, Any] | None) -> dict[str, Any]:
+def score_investigation(
+    case: dict[str, Any], report: dict[str, Any] | None, summary: dict[str, Any] | None
+) -> dict[str, Any]:
     """Compare one investigation run with the expected answer in investigations.jsonl."""
     report = report or {}
     summary = summary or {}
