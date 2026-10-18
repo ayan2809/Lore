@@ -4,7 +4,7 @@ Lore loads a fictional food-delivery company ("Kettle") into one **FalkorDB** gr
 
 Built solo by Ayan for **Graph Hacks** (WeMakeDevs x FalkorDB), Oct 15-18 2026.
 
-**Why I built it:** my roommate is an on-call engineer and a deep sleeper. One P2 incident pulled in his whole team, principal architects and leads included, and it was later found that it could have been resolved faster if people had the right context. The first person paged is often an SDE-1 who joined a couple of months ago and has no context on the system. Lore tries to bring down the time to RCA for that person, with a human in the loop reviewing and approving everything. The full story, and how I built it with Claude, is in [How I approached it](#how-i-approached-it).
+**Why I built it:** my roommate is a software engineer (SDE) who sometimes has to stay on call, and he is a deep sleeper. One P2 incident pulled in his whole team, principal architects and leads included, and it was later found that it could have been resolved faster if people had the right context. The first person paged is often an SDE-1 who joined a couple of months ago and has no context on the system. Lore tries to bring down the time to RCA for that person, with a human in the loop reviewing and approving everything. The full story, and how I built it with Claude, is in [How I approached it](#how-i-approached-it).
 
 **Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** see [Live link and video](#live-link-and-video)
 
