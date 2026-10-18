@@ -9,8 +9,9 @@ def test_recall_at_k_counts_expected_in_top_k_and_ignores_chunk_suffix():
 
 
 def test_forbidden_hits_normalises_chunks():
-    hits = s.forbidden_hits(["adr:011#1", "thread:pricing-private-0142#0"],
-                            {"thread:pricing-private-0142"})
+    hits = s.forbidden_hits(
+        ["adr:011#1", "thread:pricing-private-0142#0"], {"thread:pricing-private-0142"}
+    )
     assert hits == ["thread:pricing-private-0142"]
     assert s.forbidden_hits(["adr:011"], {"inc:INC-0326"}) == []
 
@@ -40,24 +41,41 @@ def test_score_retrieval_flags_persona_forbidden_ids():
 
 
 def test_score_generation_refusal_and_leak():
-    case = {"id": "q3", "type": "refuse", "persona": "sam", "should_refuse": True,
-            "must_include": [], "must_not_include_ids": []}
+    case = {
+        "id": "q3",
+        "type": "refuse",
+        "persona": "sam",
+        "should_refuse": True,
+        "must_include": [],
+        "must_not_include_ids": [],
+    }
     refused = {"refused": True, "claims": [], "sources": []}
     assert s.score_generation(case, refused)["refusal_ok"] is True
-    leaky = {"refused": False, "sources": [{"id": "inc:INC-0326"}],
-             "claims": [{"text": "key leaked", "citations": ["inc:INC-0326"]}]}
+    leaky = {
+        "refused": False,
+        "sources": [{"id": "inc:INC-0326"}],
+        "claims": [{"text": "key leaked", "citations": ["inc:INC-0326"]}],
+    }
     row = s.score_generation(case, leaky)
     assert row["refusal_ok"] is False and row["forbidden"] == ["inc:INC-0326"]
 
 
 def test_score_investigation():
-    case = {"id": "a", "expected_root_cause": "pr:482", "expected_rejected": ["pr:479"],
-            "expected_severity": "P1", "expected_page": "person:rahul",
-            "expected_consult": ["person:marco"], "expected_notify": ["person:priya"]}
-    report = {"root_cause": "pr:482", "severity": "P1",
-              "rejected_suspects": [{"text": "copy only", "citations": ["pr:479"]}],
-              "people": {"page": "person:rahul", "consult": ["person:marco"],
-                         "notify": ["person:priya"]}}
+    case = {
+        "id": "a",
+        "expected_root_cause": "pr:482",
+        "expected_rejected": ["pr:479"],
+        "expected_severity": "P1",
+        "expected_page": "person:rahul",
+        "expected_consult": ["person:marco"],
+        "expected_notify": ["person:priya"],
+    }
+    report = {
+        "root_cause": "pr:482",
+        "severity": "P1",
+        "rejected_suspects": [{"text": "copy only", "citations": ["pr:479"]}],
+        "people": {"page": "person:rahul", "consult": ["person:marco"], "notify": ["person:priya"]},
+    }
     row = s.score_investigation(case, report, {"steps": 11, "total_ms": 9000, "cost_usd": 0.05})
     assert row["root_cause_ok"] and row["red_herring_rejected"] and row["people_ok"]
     bad = s.score_investigation(case, {"root_cause": "pr:479"}, None)
@@ -67,9 +85,11 @@ def test_score_investigation():
 
 
 def test_aggregation_and_formatting():
-    rows = [{"id": "1", "type": "a", "recall": 1.0, "forbidden": []},
-            {"id": "2", "type": "a", "recall": 0.5, "forbidden": ["x"]},
-            {"id": "3", "type": "b", "recall": None, "forbidden": []}]
+    rows = [
+        {"id": "1", "type": "a", "recall": 1.0, "forbidden": []},
+        {"id": "2", "type": "a", "recall": 0.5, "forbidden": ["x"]},
+        {"id": "3", "type": "b", "recall": None, "forbidden": []},
+    ]
     summary = s.summarise_retrieval(rows)
     assert summary == {"cases": 3, "recall": 0.75, "forbidden": 1}
     assert s.by_type(rows, "recall") == {"a": 0.75, "b": None}
@@ -80,19 +100,35 @@ def test_aggregation_and_formatting():
 def test_report_and_history_render_from_scored_rows(tmp_path):
     from eval import run
 
-    case = {"id": "q1", "type": "easy", "persona": "arjun", "expected_sources": ["svc:pricing"],
-            "must_include": ["rahul"], "should_refuse": False}
+    case = {
+        "id": "q1",
+        "type": "easy",
+        "persona": "arjun",
+        "expected_sources": ["svc:pricing"],
+        "must_include": ["rahul"],
+        "should_refuse": False,
+    }
     ok = s.score_retrieval(case, ["svc:pricing"])
     miss = s.score_retrieval(case, ["x"])
-    answer = {"claims": [{"text": "Rahul owns it", "citations": ["svc:pricing"]}],
-              "sources": [{"id": "svc:pricing"}]}
+    answer = {
+        "claims": [{"text": "Rahul owns it", "citations": ["svc:pricing"]}],
+        "sources": [{"id": "svc:pricing"}],
+    }
     gen = s.score_generation(case, answer)
-    results = {"retrieval": {"graph": [ok], "vector": [miss]},
-               "generation": {"graph": [gen], "vector": [gen]},
-               "investigations": {},
-               "leaks": [{"persona": "sam", "probes": 3, "leaks": []}]}
-    meta = {"when": "2026-10-16 12:00", "modes": ["graph", "vector"], "layers": ["retrieval"],
-            "llm": "fake", "n_cases": 1, "notes": []}
+    results = {
+        "retrieval": {"graph": [ok], "vector": [miss]},
+        "generation": {"graph": [gen], "vector": [gen]},
+        "investigations": {},
+        "leaks": [{"persona": "sam", "probes": 3, "leaks": []}],
+    }
+    meta = {
+        "when": "2026-10-16 12:00",
+        "modes": ["graph", "vector"],
+        "layers": ["retrieval"],
+        "llm": "fake",
+        "n_cases": 1,
+        "notes": [],
+    }
     text = run.render_report(results, meta)
     assert "## Graph ON vs OFF" in text and "100%" in text and "0%" in text
     assert "retrieval/vector q1" in text  # the miss is listed under "What failed"

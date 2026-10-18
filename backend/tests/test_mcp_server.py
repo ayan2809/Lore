@@ -14,10 +14,11 @@ class EchoArgs(tools.ToolArgs):
 
 
 def echo(ctx, args):
-    return ToolResult(tool="echo", reason=args.reason, data=[{"viewer": ctx.viewer.id,
-                                                              "service": args.service,
-                                                              "hours": args.hours}])
-
+    return ToolResult(
+        tool="echo",
+        reason=args.reason,
+        data=[{"viewer": ctx.viewer.id, "service": args.service, "hours": args.hours}],
+    )
 
 
 @pytest.fixture(autouse=True)

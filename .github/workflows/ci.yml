@@ -40,9 +40,6 @@ jobs:
   integration:
     name: Integration (FalkorDB, fake embeddings)
     runs-on: ubuntu-latest
-    # TODO: remove continue-on-error once this job has passed on GitHub at least once.
-    # Until then a failure here does not turn the whole CI red.
-    continue-on-error: true
     needs: backend
     defaults:
       run:

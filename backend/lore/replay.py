@@ -65,10 +65,7 @@ def list_replays(settings: Settings | None = None) -> list[str]:
     """Names (without suffix) of every replay file available."""
     directory = replay_dir(settings)
     names = {
-        p.name.removesuffix(s)
-        for p in directory.glob("*")
-        for s in SUFFIXES
-        if p.name.endswith(s)
+        p.name.removesuffix(s) for p in directory.glob("*") for s in SUFFIXES if p.name.endswith(s)
     }
     return sorted(names)
 

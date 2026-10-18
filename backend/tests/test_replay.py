@@ -16,9 +16,20 @@ def make_events(inv="inv:orig"):
 
     return [
         ev("investigation_started", 0, 100.0, {"alert_id": "A-3001", "replay": False}),
-        ev("action_proposed", 1, 100.2, {
-            "id": "action:orig", "investigation_id": inv, "kind": "slack_post",
-            "target": "#incidents", "text": "hi", "cited_ids": ["pr:482"], "status": "proposed"}),
+        ev(
+            "action_proposed",
+            1,
+            100.2,
+            {
+                "id": "action:orig",
+                "investigation_id": inv,
+                "kind": "slack_post",
+                "target": "#incidents",
+                "text": "hi",
+                "cited_ids": ["pr:482"],
+                "status": "proposed",
+            },
+        ),
         ev("done", 2, 100.4, {"investigation_id": inv, "steps": 2, "replay": False}),
     ]
 

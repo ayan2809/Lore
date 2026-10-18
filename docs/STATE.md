@@ -65,7 +65,7 @@ Legend: ✅ implemented and verified · 🟡 implemented, only unit-tested with 
 | `data_gen/text_gen.py` (Gemini Flash text, run once) | 🟡 | Mocked Gemini only; `--dry-run` works |
 | `loader/` (indexes, MERGE+UNWIND, chunks, embeddings, MENTIONS extraction) | ✅ | Loaded into live FalkorDB (fake embeddings) |
 | `queries/*.cypher` (tools, retrieval, view, policy, memory, ask, action) | ✅ mostly | Tool, view and memory queries ran live; `ask_*`, `action_upsert` and `post_audience_check` are only unit-tested |
-| `tools.py` (11 agent tools + `run_cypher`) | ✅ | Live probe as arjun, dana and sam (see §4) |
+| `tools.py` (11 agent tools; the `run_cypher` safety net was removed, FIX_LOG F-20) | ✅ | Live probe as arjun, dana and sam (see §4) |
 | `retrieval.py`, `rerank.py` | ✅ / 🟡 | Live vector + full-text with fake vectors; rerank weights untuned |
 | `policy.py` (severity, source rank, conflicts, post-audience, request policy) | 🟡 | Unit tests; severity verified in the e2e run |
 | `report.py` (citation validator) | ✅ | e2e: an invented `pr:999` claim was dropped |
@@ -121,7 +121,7 @@ Legend: ✅ implemented and verified · 🟡 implemented, only unit-tested with 
 | C-07 | Import cycle: `llm` → `tools` → `retrieval` → `tools` | `tools.py` imports `retrieval`, `rerank` and `actions` lazily inside functions |
 | C-08 | Tools are sync but embeddings are async | `tools.embed_query()` / `set_embedder()` hook; the fake path needs no event loop |
 | C-09 | FalkorDB rejects a parameter as a variable-length path bound | `graph_neighbourhood` uses a `__HOPS__` token that Python replaces with a whole number from 1 to 3 |
-| C-10 | `run_investigation` creates its own `inv:` id, while the API has a run id | The API rewrites event ids and keeps `Run.graph_id`. A cleaner contract is in PENDING (P1) |
+| C-10 | `run_investigation` created its own `inv:` id, while the API had a run id | Resolved (FIX_LOG F-22): the API passes its run id to the supervisor, so the stream, the Investigation node and feedback share one id |
 | C-12 | **Real leak found in review:** as Sam (contractor), `run_cypher` returned whole `Finding` nodes, whose text can come from other viewers' restricted investigations. `visible_ids` treated every node without `access_level` as visible, and the MCP server exposed `run_cypher` | `visible_ids` now only treats org/structure labels as open; memory nodes are never visible through it. The MCP server no longer exposes `run_cypher` or `propose_action`. A regression test was added. The root fix (access levels on Findings) is PENDING T-10 |
 | C-11 | The Story bible's PR numbering and dates aren't monotonic (e.g. #479 merged after #482; deploy 990 after 991) | Kept as written; flagged for review (HUMAN_REVIEW R-02) |
 | I-01 | The FalkorDB image's `run.sh` ignores command-line arguments (read from the image layer): it builds `redis-server ${REDIS_ARGS} --protected-mode no --dir $FALKORDB_DATA_PATH --loadmodule falkordb.so ${FALKORDB_ARGS}` itself. The plan's "pass `--requirepass` as the container command" would have started FalkorDB **without a password** and with no error | The container entrypoint is `sh -c 'export REDIS_ARGS="--requirepass $FALKORDB_PASSWORD --appendonly yes"; exec run.sh'` (ECS and `docker-compose.yml`). The data directory is confirmed: `run.sh` already uses `--dir /var/lib/falkordb/data` |

@@ -215,7 +215,7 @@ FalkorDB Browser runs at http://localhost:3000. You can type Cypher, see results
 
 **10. A growing AI ecosystem.** FalkorDB's GraphRAG SDK, plus integrations with Graphiti, Cognee, Mem0, LangChain, LlamaIndex and MCP (Model Context Protocol).
 
-**Know its history:** FalkorDB is the successor to RedisGraph and was built by the same team. RedisGraph reached end-of-life on January 31, 2025. When you search online, ignore RedisGraph-only advice, and don't assume Neo4j-only features exist. FalkorDB supports a **subset** of openCypher, plus its own extensions.
+**Know its history:** FalkorDB is the successor to RedisGraph and was built by the same team. RedisGraph has reached end-of-life. When you search online, ignore RedisGraph-only advice, and don't assume Neo4j-only features exist. FalkorDB supports a **subset** of openCypher, plus its own extensions.
 
 ### L.9 Beginner traps the docs warn about
 

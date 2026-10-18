@@ -29,22 +29,32 @@ class FakeGraph:
 
 
 def make_fake_supervisor(seen: list):
-    """Emits 3 events then `done`, using its own investigation id (like the real supervisor)."""
+    """Emits 3 events then `done` under a different id, to check the API keeps its own id."""
 
-    async def fake_supervisor(alert_id, viewer, *, mode, llm, graph, emit, settings=None):
+    async def fake_supervisor(
+        alert_id, viewer, *, mode, llm, graph, emit, settings=None, investigation_id=None
+    ):
         seen.append((alert_id, viewer.id, mode))
         inner = "inv:inner"
-        for seq, (type_, payload) in enumerate([
-            ("investigation_started", {"alert_id": alert_id, "viewer_id": viewer.id,
-                                        "mode": mode, "replay": False}),
-            ("agent_started", {"agent": "triage", "goal": "g"}),
-            ("tool_call", {"tool": "find_entity", "reason": "r", "args": {}}),
-        ]):
-            await emit(StepEvent(type=type_, investigation_id=inner, seq=seq, ts=0.0,
-                                 payload=payload))
+        for seq, (type_, payload) in enumerate(
+            [
+                (
+                    "investigation_started",
+                    {"alert_id": alert_id, "viewer_id": viewer.id, "mode": mode, "replay": False},
+                ),
+                ("agent_started", {"agent": "triage", "goal": "g"}),
+                ("tool_call", {"tool": "find_entity", "reason": "r", "args": {}}),
+            ]
+        ):
+            await emit(
+                StepEvent(type=type_, investigation_id=inner, seq=seq, ts=0.0, payload=payload)
+            )
         summary = RunSummary(investigation_id=inner, steps=1)
-        await emit(StepEvent(type="done", investigation_id=inner, seq=3, ts=0.0,
-                             payload=summary.model_dump()))
+        await emit(
+            StepEvent(
+                type="done", investigation_id=inner, seq=3, ts=0.0, payload=summary.model_dump()
+            )
+        )
         return Report(summary="s"), summary
 
     return fake_supervisor
@@ -59,8 +69,9 @@ def build_client(limit: int = 100, **settings_extra):
         tmp = Path(tempfile.mkdtemp())
         shutil.copy(SAMPLE_REPLAY, tmp / SAMPLE_REPLAY.name)
         settings_extra["replay_dir"] = str(tmp)
-    settings = Settings(session_secret="test-secret", rate_limit_per_minute=limit, _env_file=None,
-                        **settings_extra)
+    settings = Settings(
+        session_secret="test-secret", rate_limit_per_minute=limit, _env_file=None, **settings_extra
+    )
     app = create_app(settings)
     seen: list = []
     registry = RunRegistry(supervisor=make_fake_supervisor(seen), replay_speed=10_000)
@@ -79,8 +90,11 @@ def api():
 
 
 def event_names(response_text: str) -> list[str]:
-    return [line.removeprefix("event:").strip() for line in response_text.splitlines()
-            if line.startswith("event:")]
+    return [
+        line.removeprefix("event:").strip()
+        for line in response_text.splitlines()
+        if line.startswith("event:")
+    ]
 
 
 def login(client, persona):
@@ -157,9 +171,7 @@ def test_investigation_streams_events_then_done(api):
     ]
     with client.stream("GET", f"/api/investigations/{iid}/events") as resp:
         text = "".join(resp.iter_text())
-    assert event_names(text) == [
-        "investigation_started", "agent_started", "tool_call", "done"
-    ]
+    assert event_names(text) == ["investigation_started", "agent_started", "tool_call", "done"]
     assert "inv:inner" not in text  # the client only sees the API's investigation id
     assert seen == [("A-3001", "person:arjun", "graph")]
     # a late subscriber gets the whole history again
@@ -193,9 +205,9 @@ def test_other_personas_cannot_read_a_run(api):
 def test_replay_flag_plays_sample_recording(api):
     client, seen = api
     login(client, "arjun")
-    iid = client.post(
-        "/api/investigations", json={"alert_id": "A-3001", "replay": True}
-    ).json()["investigation_id"]
+    iid = client.post("/api/investigations", json={"alert_id": "A-3001", "replay": True}).json()[
+        "investigation_id"
+    ]
     with client.stream("GET", f"/api/investigations/{iid}/events") as resp:
         text = "".join(resp.iter_text())
     names = event_names(text)
@@ -291,8 +303,10 @@ def make_request(headers: dict[str, str], peer: str | None = "10.20.1.5") -> Req
         ({"CloudFront-Viewer-Address": "2001:db8::1:443"}, "2001:db8::1"),  # IPv6, no brackets
         ({"CloudFront-Viewer-Address": "[2001:db8::1]:443"}, "2001:db8::1"),
         # CloudFront wins over X-Forwarded-For, which is only a fallback
-        ({"CloudFront-Viewer-Address": "203.0.113.7:1", "X-Forwarded-For": "198.51.100.9"},
-         "203.0.113.7"),
+        (
+            {"CloudFront-Viewer-Address": "203.0.113.7:1", "X-Forwarded-For": "198.51.100.9"},
+            "203.0.113.7",
+        ),
         ({"X-Forwarded-For": "198.51.100.9, 10.20.1.5"}, "198.51.100.9"),  # first entry
         ({}, "10.20.1.5"),  # no proxy headers: the direct peer
     ],
@@ -308,12 +322,40 @@ def test_client_ip_without_any_information():
 def test_rate_limit_is_per_cloudfront_viewer_address():
     client, _, _ = build_client(limit=1)
     with client:
+
         def post(viewer: str) -> int:
-            return client.post("/api/investigations", json={"alert_id": "A-3001"},
-                               headers={"CloudFront-Viewer-Address": viewer}).status_code
+            return client.post(
+                "/api/investigations",
+                json={"alert_id": "A-3001"},
+                headers={"CloudFront-Viewer-Address": viewer},
+            ).status_code
 
         assert [post("203.0.113.7:1000"), post("203.0.113.7:2000")] == [200, 429]  # same IP
         assert post("203.0.113.8:1000") == 200  # another visitor has their own budget
+
+
+def test_supervisor_uses_the_api_run_id_so_feedback_finds_the_investigation():
+    got = []
+
+    async def supervisor(alert_id, viewer, *, mode, llm, graph, emit, settings=None, **kw):
+        got.append(kw.get("investigation_id"))
+        summary = RunSummary(investigation_id=got[0], steps=0)
+        done = StepEvent(
+            type="done", investigation_id=got[0], seq=0, ts=0.0, payload=summary.model_dump()
+        )
+        await emit(done)
+        return Report(summary="s"), summary
+
+    client, _, registry = build_client()
+    registry.supervisor = supervisor
+    with client:
+        login(client, "arjun")
+        iid = client.post("/api/investigations", json={"alert_id": "A-3001"}).json()[
+            "investigation_id"
+        ]
+        with client.stream("GET", f"/api/investigations/{iid}/events") as resp:
+            "".join(resp.iter_text())
+    assert got == [iid]
 
 
 def test_supervisor_crash_ends_stream_with_error_then_done():

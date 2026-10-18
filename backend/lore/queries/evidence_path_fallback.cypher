@@ -1,7 +1,8 @@
 // evidence_path_fallback: same job as evidence_path.cypher, but with plain Cypher shortestPath.
 //
-// Used only if algo.SPpaths fails on Day 1 (for example because of the weightProp question in
-// plan L.11). Same output columns, same permission rule on the suspect PR.
+// tools.evidence_path runs this only if the algo.SPpaths call raises (for example on a FalkorDB
+// build that wants a weight property on every relationship type). Same output columns, same
+// permission rule on the suspect PR.
 //
 // Params: $alert, $pr, $viewer, $open_levels
 MATCH (viewer:Person {id: $viewer})

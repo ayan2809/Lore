@@ -69,9 +69,7 @@ def embed_texts(
                     raise
                 time.sleep(2**attempt)
         if len(response.embeddings) != len(batch):
-            raise RuntimeError(
-                f"asked for {len(batch)} embeddings, got {len(response.embeddings)}"
-            )
+            raise RuntimeError(f"asked for {len(batch)} embeddings, got {len(response.embeddings)}")
         # Gemini does not scale shortened vectors to length 1, so do it here
         out.extend(_normalise(list(e.values)) for e in response.embeddings)
     return out

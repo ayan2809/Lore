@@ -35,16 +35,29 @@ REPORT = Report(
 
 def test_message_uses_names_structure_and_links_not_raw_ids():
     summary = "Incident alert:A-3001: pr:482 lowered the TTL <see adr:011> & broke checkout."
-    msg = fmt.build_message(REPORT, "alert:A-3001", summary, NAMES,
-                            lore_url="https://d1.cloudfront.net",
-                            issue_url="https://github.com/o/r/issues/2")
+    msg = fmt.build_message(
+        REPORT,
+        "alert:A-3001",
+        summary,
+        NAMES,
+        lore_url="https://d1.cloudfront.net",
+        issue_url="https://github.com/o/r/issues/2",
+    )
     text = json.dumps(msg["blocks"])
     assert msg["blocks"][0]["type"] == "header" and "P1" in msg["blocks"][0]["text"]["text"]
     assert "checkout p99 latency" in msg["blocks"][0]["text"]["text"]
     for raw in ("pr:482", "person:rahul", "adr:011", "inc:INC-0307", "deploy:991", "svc:pricing"):
         assert raw not in text, raw
-    for readable in ("PR #482", "Priya Nair", "Rahul Verma", "Marco Bianchi", "ADR-011",
-                     "INC-0307", "deploy 991", "PR #479"):
+    for readable in (
+        "PR #482",
+        "Priya Nair",
+        "Rahul Verma",
+        "Marco Bianchi",
+        "ADR-011",
+        "INC-0307",
+        "deploy 991",
+        "PR #479",
+    ):
         assert readable in text, readable
     assert "<https://d1.cloudfront.net|Open Lore>" in text
     assert "<https://github.com/o/r/issues/2|GitHub issue>" in text

@@ -3,8 +3,8 @@
 // algo.SPpaths is FalkorDB's built-in shortest-path algorithm. We allow only four relationship
 // types, in either direction, at most 6 hops:
 //   alert -FIRED_ON-> service -DEPENDS_ON-> service <-DEPLOYED_TO- deploy -INCLUDES-> PR
-// Edge weights come from the `w` property (DEPENDS_ON edges have w = 1). If Day 1 testing shows
-// the other types need `w` too, either add it in the loader or use evidence_path_fallback.cypher.
+// Edge weights come from the `w` property (DEPENDS_ON edges have w = 1). If the algorithm call
+// fails, tools.evidence_path retries with evidence_path_fallback.cypher (plain shortestPath).
 //
 // We return plain lists (node ids in order, then the edges as parallel lists) so Python needs no
 // graph objects: edge i goes from rel_sources[i] to rel_targets[i] with type rel_types[i].

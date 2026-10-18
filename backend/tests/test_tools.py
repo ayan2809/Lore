@@ -24,7 +24,6 @@ EXPECTED_MODES = {
     "trace_decision": {"graph"},
     "who_knows": {"graph"},
     "propose_action": {"graph", "vector"},
-    "run_cypher": {"graph"},
 }
 
 # Query files that return content (sources, chunks, threads, tickets, docs, incidents, PRs).
@@ -42,7 +41,6 @@ CONTENT_QUERIES = [
     "who_knows",
     "graph_neighbourhood",
     "source_detail",
-    "visible_ids",
 ]
 # Checks the permission of each channel reader instead of the viewer, so it has no $viewer.
 AUDIENCE_QUERIES = ["post_audience_check", "policy_restricted_citations"]  # policy checks
@@ -543,68 +541,6 @@ def test_propose_action_calls_actions_propose(make_ctx, monkeypatch):
     assert seen["investigation_id"] == "inv-1" and seen["title"] is None
     assert result.data[0]["id"] == "action:1"
     assert result.data[0]["unverified_citations"] == ["adr:999"]
-
-
-# ------------------------------------------------------------------ run_cypher safety net
-
-
-@pytest.mark.parametrize(
-    "query",
-    [
-        "MATCH (n) SET n.x = 1 RETURN n.id",
-        "CREATE (n:X) RETURN n.id",
-        "MATCH (n) DETACH DELETE n",
-        "MATCH (n) RETURN n.id; MATCH (m) RETURN m.id",
-        "CALL db.idx.vector.createNodeIndex('Chunk') RETURN 1",
-        "CALL dbms.something() YIELD x RETURN x",
-        "MATCH (c:Chunk) RETURN c.id",
-        "MATCH (t:Thread) RETURN t.id, t.text",
-    ],
-)
-def test_run_cypher_rejects_unsafe_queries(make_ctx, fake_graph, query):
-    result = call_tool(make_ctx(), "run_cypher", {"reason": "x", "cypher": query})
-    assert result.error and result.error.startswith("rejected")
-    assert fake_graph.calls == []
-
-
-def test_run_cypher_allows_keywords_inside_strings():
-    assert tools.check_read_only("MATCH (n) WHERE n.name = 'reset create' RETURN n.id") is None
-
-
-def test_force_limit():
-    assert tools.force_limit("MATCH (n) RETURN n.id") == "MATCH (n) RETURN n.id LIMIT 50"
-    assert tools.force_limit("MATCH (n) RETURN n.id LIMIT 5;") == "MATCH (n) RETURN n.id LIMIT 5"
-    assert tools.force_limit("MATCH (n) RETURN n.id LIMIT 9999").endswith("LIMIT 200")
-
-
-def test_run_cypher_drops_rows_with_ids_the_viewer_cannot_see(make_ctx, fake_graph):
-    fake_graph.on(
-        "MATCH (n) RETURN",
-        outcome(
-            ["id", "n"],
-            ["adr:011", 1],
-            ["thread:pricing-private-0142", 2],  # not visible
-            [None, 3],  # no id at all: cannot be verified, so dropped
-        ),
-    )
-    fake_graph.on("visible_ids:", outcome(["id"], ["adr:011"]))
-    result = call_tool(
-        make_ctx("arjun"),
-        "run_cypher",
-        {"reason": "x", "cypher": "MATCH (n) RETURN n.id AS id, 1 AS n"},
-    )
-    assert result.error is None
-    assert [r["id"] for r in result.data] == ["adr:011"]
-    assert result.node_ids == ["adr:011"]
-    assert result.restricted_matches == 2
-    assert "thread:pricing-private-0142" not in str(result.model_dump())
-    assert fake_graph.params_for("MATCH (n) RETURN")["viewer"] == "person:arjun"
-    assert fake_graph.params_for("visible_ids:")["viewer"] == "person:arjun"
-
-
-def test_run_cypher_is_not_available_in_vector_mode(make_ctx):
-    result = call_tool(make_ctx(mode="vector"), "run_cypher", {"reason": "x", "cypher": "RETURN 1"})
-    assert "not available" in result.error
 
 
 def test_graph_never_receives_a_write(make_ctx, fake_graph):

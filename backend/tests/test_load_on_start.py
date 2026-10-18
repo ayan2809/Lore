@@ -99,8 +99,12 @@ def test_empty_graph_is_loaded_with_real_embeddings(monkeypatch):
     load_data_if_empty(CountingGraph(), settings_for(gemini_api_key="k", embed_dim=768))
     assert calls == [(False, 768)]
     names = [e["event"] for e in events]
-    assert names == ["load_on_start_begin", "load_on_start_progress", "load_on_start_progress",
-                     "load_on_start_done"]
+    assert names == [
+        "load_on_start_begin",
+        "load_on_start_progress",
+        "load_on_start_progress",
+        "load_on_start_done",
+    ]
     assert events[1]["message"] == "nodes: 943"
     assert "api_key" not in str(events)  # the key is never logged
 

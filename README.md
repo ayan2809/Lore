@@ -4,9 +4,33 @@ Lore loads a fictional food-delivery company ("Kettle") into one **FalkorDB** gr
 
 Built solo by Ayan for **Graph Hacks** (WeMakeDevs x FalkorDB), Oct 15-18 2026.
 
-> **Status: skeleton.** Items marked **TODO** are placeholders. Results, links and the video are filled in only when they exist. No number in this README is invented; evaluation numbers come from `backend/eval/report.md`.
+**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** see [Live link and video](#live-link-and-video)
 
-Jump to: [Quickstart](#quickstart) | [Tracks](#tracks-entered) | [Live link and video](#live-link-and-video) | [AI-assistant disclosure](#ai-assistant-disclosure)
+![The Lore investigation screen: the reasoning trail on the left, the permission-filtered company graph with the evidence path lit in the middle, and the cited root-cause report with who to page on the right](docs/img/investigation.png)
+
+Every number in this README comes from a real run or from the eval reports in `backend/eval/`. Kettle is fictional and all data is synthetic; every date in the data is a date in Kettle's story, not a project date.
+
+Jump to: [Why I built it](#why-i-built-it) | [Quickstart](#quickstart) | [Tracks](#tracks-entered) | [Live link and video](#live-link-and-video) | [Design decisions and Q&A](docs/DESIGN_QA.md) | [AI-assistant disclosure](#ai-assistant-disclosure)
+
+## Why I built it
+
+I will be honest with my implementation and how i approach of the problem. I am completely new to graphs. I am someone who loved learning the algorithms around Data Structures and earlier this year learnt about them but was limited only to Graphs. I also am working with an NGO in my current organization which has a requirement of Graphs and its implementation in solving for a problem which requires grading an electronics experiment which has jumper wires and that forms a graph netlist. That is making me dive deeper into the entire concept of graph.
+
+Meanwhile i noticed this event on Luma and also happened to sent by my friends. I was quite pessimistic about this hackathon coz am already a bit swamped up with work and the NGO project. But anyways went ahead and decided to plan about it before the hackathon began. I just wanted to learn how falkordb implements graphs for a database and is it really that helpful while building context engines around it. This got me curious and i skimmed through the docs of falkordb and also how graph databases work. In my current org i have been building context management systems for the past 10 months and had a fair idea of the places this kind of a vector search based context engine fails and the tradeoffs. The main thing is that we cannot really derive relationships or like query similar or related connected things as in we cannot infer A caused B and B caused C from a simple vector search. This is something which graph databases solve for and are really good at.
+
+Honestly i did not know what problem to work on for the hackathon so i prompted Claude that these are my understanding and i want to learn about this technology so that next time when i encounter it i will be aware about this. I also wanted to share what i understood from this implementation. Claude went ahead and planned the project for me, proposed that i can implement something for an on call engineer.
+
+My roommate works in a reputed company as an SDE and sometimes has to stay on call, and he is a deep sleeper. Whenever his pager gets triggered i always complain that bhai uth jaa page hogaya hai....!!! And then he wakes up and has to sit through the incident till everything is in place. One time it was a major one and took the entire team with even the principal architects and leads time to resolve a P2 incident and was later diagnosed that it could have been resolved faster if people had the right context. Getting the context of why an incident happened at a particular time and why it happened is what takes on calls engineers time the most. And mostly its the SDE-1s who are the first point of contact incase of an incident and then it get translated to the upper management and folks who have the most context about the project. But a SDE-1 who joined maybe couple of months in the project has no context or a lot of work experience in the system where the person got paged.
+
+I am also someone who is curious about neuroscience, and it is hard for anyone to stay calm in a stressful moment like a P2 incident, after being woken up and staying on call the whole night. Under acute stress, the brain releases stress chemicals that quickly weaken the prefrontal cortex, the part that handles working memory, planning and careful reasoning ([Arnsten, 2009](https://pubmed.ncbi.nlm.nih.gov/19455173/)). Losing sleep makes it worse: the amygdala, which reacts to threats, becomes more reactive and less connected to the prefrontal regions that calm it down ([Yoo et al., 2007](https://doi.org/10.1016/j.cub.2007.08.007)). People call this an "amygdala hijack". So in that panic we don't always think properly, and it happens to the best of us. Lore does the careful part: it runs the queries, checks every suspect against the evidence and hands over a clean RCA with sources, so the person on call can review it with a calmer head.
+
+This is what my project is trying to solve. Its trying to bring down the time to RCA and always having a human in the loop to always review and approve it in detail. Lore here is an attempt to build that loop.
+
+Claude helped me setup the stage and the initial plan of the project. And then i guided it through the implementation. Making edits to the code it wrote, ensuring it aligns with the rules of reliability, maintainability and scalability and best practices of deployments with proper budgeting alerting and model selection. I architected the solution, guided the implementation by testing it humanly trying to break it noticing the bugs and reporting them to claude to fix. Noticing the design of the codebase suggesting some edits to the best of my knowledge and also like guiding on the infra side of things which i have knowledge about and chose fargate because its cheaper and did not need an ACM endpoint and the load balancer endpoint is enough to serve the application with the db and api on fargate services and the frontend on the s3 cloudfront.
+
+Cypher queries is similar to SQL according to my understand but that is also what claude wrote. I reviewed the models.py file thoroughly. Yeah this has been my approach while using claude. I kept using the /btw feature on claude to ask questions and guide me on tasks. To self evaluate i was a beginner with the graph db, cypher and also the backend designing part. I was mostly reviewing based on the crux of the files handling the infra giving appropriate roles, using the /design skill to generate designs for the UI and also used the remote control feature to guide and read the docs of claude code implementation while travelling coz its the week of navratri at my place.
+
+I also navigated the UI and identified areas of improvement and also how it can be improved and suggested those edits to claude like the comparison of the graph vs non graph mode. Then in the non graph mode the vector dbs should show up instead of the graph. Also the slight glitchy feel which i noticed while navigating the UI etc.
 
 ---
 
@@ -74,6 +98,21 @@ Three rules carry the design:
 2. **Permissions are enforced inside the Cypher query.** Content the viewer may not see never leaves FalkorDB. The viewer comes from the login session, never from the model.
 3. **Facts are computed in code; the model narrates.** Gemini picks tools and writes text; every claim must cite an id that a tool returned in this run.
 
+### How the agents work
+
+A plain-Python supervisor runs four specialist agents in a fixed order. Each agent is the same tool-calling loop with its own prompt, tools and model; code decides the facts between steps, the agents share a blackboard in the graph, and a human approves anything that goes out. More in [docs/DESIGN_QA.md](docs/DESIGN_QA.md).
+
+![How Lore's agents are built: the supervisor runs Triage, Historian, Investigator and Responder in order, with code rules between them, read-only Cypher tools over FalkorDB below, and human approval before Slack and GitHub](docs/img/agent-architecture.png)
+
+<details>
+<summary>Inside one agent, and which design pattern it follows</summary>
+
+![The loop inside one agent: Gemini calls a tool or stops; code runs the tool with the permission filter; findings are checked for citations with one retry, then written to the blackboard](docs/img/agent-loop.png)
+
+![Design patterns used: a sequential workflow with gates, a deterministic supervisor, a ReAct tool loop per agent, a blackboard, a fixed tool catalogue, an evaluator with one retry, facts in code, human in the loop, and three kinds of memory](docs/img/agent-patterns.png)
+
+</details>
+
 ### Who decides what
 
 | The model (Gemini) does | The code does | A human does |
@@ -124,7 +163,22 @@ Full schema: [docs/plan.md](docs/plan.md) section 5, story: [docs/story-bible.md
 
 ### Documented Cypher
 
-Every query the system runs lives in its own documented file: **[backend/lore/queries/](backend/lore/queries/)** (`*.cypher`). TODO: confirm the folder is complete and each file has a header comment explaining what it does and why, once the backend is finished.
+Every query the agents, the API and the memory module run lives in its own file in **[backend/lore/queries/](backend/lore/queries/)** (42 `*.cypher` files). Each starts with a comment saying what it does, why, and its parameters. The loader's bulk `MERGE` statements and the index setup are in [`backend/lore/loader/`](backend/lore/loader/).
+
+The ones that carry the demo:
+
+| Query | What it does | FalkorDB feature |
+|---|---|---|
+| [`recent_changes`](backend/lore/queries/recent_changes.cypher) | Deploys and PRs in the failing service and everything it depends on (up to 3 hops), with the code modules each PR modified | variable-length `DEPENDS_ON*0..3` |
+| [`evidence_path`](backend/lore/queries/evidence_path.cypher) | Shortest chain alert → service → dependency → deploy → PR, over four relationship types | `algo.SPpaths` (falls back to `shortestPath`) |
+| [`blast_radius`](backend/lore/queries/blast_radius.cypher) | Which services depend on the failing one (up to 4 hops back), with their tier; severity is set from this by a rule in code | reverse `DEPENDS_ON` traversal |
+| [`pagerank_services`](backend/lore/queries/pagerank_services.cypher) | Which services the rest of the company leans on most | `algo.pageRank` |
+| [`vector_search_permitted`](backend/lore/queries/vector_search_permitted.cypher) | Search by meaning, keeping only sources the viewer may see | vector index `db.idx.vector.queryNodes` + permission path |
+| [`fulltext_search_permitted`](backend/lore/queries/fulltext_search_permitted.cypher) | Keyword search with the same permission rule | full-text index |
+| [`trace_decision`](backend/lore/queries/trace_decision.cypher) | From a service or ADR to the decision, the discussion behind it and what it superseded | `IMPLEMENTS`, `DISCUSSED_IN`, `SUPERSEDES` |
+| [`who_knows`](backend/lore/queries/who_knows.cypher) | The owner (current `MEMBER_OF` only, so people who moved teams drop out) and hands-on experts, scored from PRs authored and reviewed and incidents resolved | aggregation over `AUTHORED`, `REVIEWED`, `RESOLVED_BY` |
+| [`restricted_match_count`](backend/lore/queries/restricted_match_count.cypher) | How many relevant sources the viewer may *not* see, and which team to ask; never their content | the permission test inverted |
+| [`memory_*`](backend/lore/queries/) | Investigations, steps, findings and playbooks written back into the graph | episodic and procedural memory |
 
 ### Identity, retries and failures
 
@@ -136,33 +190,38 @@ Every query the system runs lives in its own documented file: **[backend/lore/qu
 
 ### Failure cases
 
-Failures are built in on purpose. The "what the system did" column is filled in from real runs; TODO until then.
+Failures are built in on purpose. The last column says what happened and where it is checked.
 
-| Failure | How it is caused | What Lore should do (design) | What the system did (TODO) |
+| Failure | How it is caused | What Lore does | What happened (evidence) |
 |---|---|---|---|
-| Out-of-date or conflicting source | Story D in the story bible | Rank sources by rule, answer from the most trustworthy, show both with a "conflict" tag | TODO |
-| Model returns badly formatted output | Test that feeds broken output | Reject with Pydantic, retry once with the error, otherwise show raw findings with a warning | TODO |
-| A tool call times out | Artificial delay on a query or the GitHub API | Give up after a set time, back off and retry, mark the step failed, continue with other evidence | TODO |
-| User lacks permission | Sam asks about the security incident | Refuse with the restricted warning and who to ask; the trace shows nothing restricted was fetched | TODO |
-| Request breaks policy | "Post the security details to #general", "Roll back prod now" | Block in code with the reason; a rollback is only ever a proposal | TODO |
-| Gemini is down or out of quota | Revoke the API key during a test run | Replay mode, clearly labelled | TODO |
+| Out-of-date or conflicting source | Story D: an old wiki says "60 s TTL is fine", ADR-011 says "≥ 300 s" | Rank sources by rule (ADR > runbook > ticket > Slack; `SUPERSEDES` wins), answer from the best one, show both with a "conflict" tag | Unit tests `test_superseded_source_is_tagged_conflict_and_both_are_shown`, `test_supersedes_wins_even_against_a_higher_rank`. Eval: stale-source recall@5 76% with the graph vs 29% without |
+| Model returns badly formatted or uncited output | Tests feed broken output | Parse into Pydantic; every claim must cite an id a tool returned in this run; one retry with the problems listed, then invalid claims are dropped and flagged | Tests `test_uncited_claim_gets_one_retry_with_the_problems`, `test_claims_still_invalid_after_retry_are_dropped` |
+| A model or tool call fails or times out | Timeouts, 429/5xx from Gemini, an agent raising | Gemini calls time out and retry with backoff (1 s, 2 s, 4 s); a failed tool returns an error step and the run continues with other evidence | Tests `test_supervisor_survives_an_agent_failure`, `test_gemini_does_not_retry_a_bad_request`; `GRAPH.RO_QUERY` runs with a query timeout |
+| User lacks permission | Sam (contractor) runs the incident | No PRs or deploys reach him; the report says restricted sources exist and who to ask | Live: Sam gets no root cause, by design. Leak test: 0 restricted ids across 4 personas × 63 probes |
+| Request breaks policy | Dana's draft GitHub issue cites the private `#pricing-private` thread, and the repo is public; "roll back prod now" | Blocked in code with the reason; a rollback is only ever a proposal | Live: the issue was blocked with the reason (FIX_LOG F-09); tests `test_blocked_requests`, `test_post_blocked_when_a_member_cannot_see_a_cited_source` |
+| Gemini is down or the daily budget is spent | More than 100 live runs in a day, or no key | Replay a recorded run of the same alert, persona and mode, clearly labelled "replay" | The API switches to replay at the daily cap (`daily_live_limit`); Graph OFF never replays a Graph ON recording (test `test_graph_off_replay_never_falls_back_to_a_graph_on_recording`) |
 
 ## 5. How did you evaluate it?
 
-A fixed set of 50+ golden questions (`backend/eval/golden.jsonl`) across five types (easy lookup, cross-source synthesis, conflicting sources, out-of-date information, should refuse), asked as different personas. Each layer is measured separately. Scoring is deterministic (key facts and source ids present), not an AI judge. Run it with `make eval`; it writes `backend/eval/report.md`.
+A fixed set of 59 golden questions (`backend/eval/golden.jsonl`) across five types (easy lookup, cross-source synthesis, conflicting sources, out-of-date information, should refuse), asked as different personas. Each layer is measured separately. Scoring is deterministic (key facts and source ids present), not an AI judge. Run it with `make eval`; it writes [`backend/eval/report.md`](backend/eval/report.md) and [`report_generation.md`](backend/eval/report_generation.md).
 
-**TODO: fill this table from `backend/eval/report.md` after `make eval`. Do not type numbers that are not in the report.**
+**Graph ON vs Graph OFF.** Graph OFF is the baseline: the same agents and models, but they can only search text by meaning. It still runs on FalkorDB (its vector index), with the same permission check in Cypher, so it measures what the graph's *links* add. Nothing in Lore runs without FalkorDB.
 
 | Layer | Measure | Target | Graph ON | Graph OFF (vector only) |
 |---|---|---|---|---|
-| Retrieval | Expected sources in top 5 (recall); forbidden ids returned | High recall; 0 forbidden | TODO | TODO |
-| Generation | Claims with a valid source | at least 90% | TODO | TODO |
-| Generation | Key facts present (`must_include`) | TODO | TODO | TODO |
-| Generation | Correct refusals on "should refuse" questions | all | TODO | TODO |
-| Permissions | Restricted ids in any persona's results or citations | **0** (automatic pytest test) | TODO | TODO |
-| Investigations | Root cause correct (5 runs x 3 scenarios), red herring rejected | TODO | TODO | TODO |
-| Investigations | Time to root cause | under 3 min | TODO | TODO |
-| Investigations | Steps and cost per run | TODO | TODO | TODO |
+| Retrieval | Expected sources in the top 5 (recall@5) | high | **75%** | 38% |
+| Retrieval | Plain lookups ("who reviewed PR 482?") recall@5 | high | **93%** | 11% |
+| Generation (Ask) | Answers with the key facts | high | **71%** | 43% |
+| Generation (Ask) | Claims with a valid source | at least 90% | 67% (below target) | 49% |
+| Generation (Ask) | Correct refusals on "should refuse" questions | all | 93% | 66% |
+| Permissions | Restricted ids returned, 4 personas × 63 probes | **0** | **0** | **0** |
+| Investigation, Story A (live, 6 runs as Arjun) | Root cause PR #482; red herring PR #479 rejected | every run | 6/6; 6/6 | see below |
+| Investigation, Story A | Time to root cause | under 3 min | 42–54 s (whole run 50–60 s) | 102 s (one recorded run) |
+| Investigation, Story A | Cost per run | low | $0.022–0.027 | $0.091 (one recorded run) |
+
+On Story A, Graph OFF also names PR #482, because the PR's own text mentions the cache TTL. But it needs a second Investigator pass, never examines the red herring, and gives no severity, no evidence path and nobody to page. Learned playbooks make the next similar incident cheaper: on Story B the Investigator went from 8 to 4 steps and the time to root cause from 50 s to 39 s. Details and every fix found while testing: [docs/FIX_LOG.md](docs/FIX_LOG.md).
+
+![Graph ON vs Graph OFF on the same alert: a table comparing root cause, suspects ruled out, severity, evidence path, who to page, tool calls, time to root cause and cost](docs/img/compare.png)
 
 Hand-checked answers: TODO (about 10 checked by hand; record how many matched the automatic score).
 
@@ -210,7 +269,7 @@ All three tracks.
 
 ## Live link and video
 
-- Live demo: **TODO** (frontend on Vercel, API on a VM; the link goes here, with the replay fallback noted).
+- Live demo: **https://d1cu7fzoa0v5wz.cloudfront.net** (AWS: CloudFront + S3 for the page, ECS Fargate for the API with FalkorDB beside it on EFS; see [infra/README.md](infra/README.md)). Live runs call Gemini; after 100 live runs in a day the API plays back a recorded run instead, and the UI marks it "REPLAY". Tick "Replay a recorded run" to watch one without using a live run.
 - Demo video (about 3 minutes, business problem first, with one failure case): **TODO**
 - Blog post: **TODO** (optional side prize)
 
@@ -223,17 +282,34 @@ All three tracks.
 | [docs/story-bible.md](docs/story-bible.md) | The fake company; single source for data and evals |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | How to run, reset, deploy and troubleshoot |
 | [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Repo layout, API and module contracts |
+| [docs/DESIGN_QA.md](docs/DESIGN_QA.md) | The main design decisions, and answers to the questions a reviewer is likely to ask |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | The decision log, with the alternatives rejected |
+| [docs/FIX_LOG.md](docs/FIX_LOG.md) | Every bug found in live testing, why it happened, the fix and how it was verified |
+| [backend/eval/](backend/eval/) | Golden questions, the eval harness and its reports |
+| [infra/README.md](infra/README.md) | The AWS deployment |
+
+## License
+
+[MIT](LICENSE)
 
 ## AI-assistant disclosure
 
-Hackathon rules require disclosing AI coding assistants. **This is an honest first draft. TODO(Ayan): review and rewrite it in your own words so it is exactly true.**
+Hackathon rules require disclosing AI coding assistants. The story below is in my own words.
 
-**Tool used:** Claude Code (Anthropic). On Oct 16 2026, Claude Code was used to scaffold the project skeleton: backend modules, frontend, Docker and CI configuration, the Makefile, the runbook and this README structure. Gemini is used at runtime by the product itself (agents, extraction, embeddings) and to generate the synthetic Slack/ticket/ADR wording.
+**Tools used:** Claude Code (Anthropic) wrote most of the code and docs in this repo: the skeleton on Oct 16, then the fixes, the AWS infrastructure, the UI changes and the docs, as I directed, reviewed and tested them. The UI screens and diagrams were designed with Claude's `/design` skill. Gemini is used at runtime by the product itself (agents, extraction, embeddings) and generated the synthetic Slack, ticket and ADR wording.
 
-**Planning (before Oct 15):** the plan (`docs/plan.md`) was drafted with Claude in planning sessions at Ayan's request: Ayan set the constraints (solo, Python + React + FalkorDB + FastAPI + Gemini, demoable in 4 days, FDE portfolio framing) and asked Claude to propose the project; Claude proposed the domain, the "Lore" concept, the discovery brief numbers, the permission model and the eval design; Ayan reviewed and re-shaped it (e.g. aligning it to the FDE handout's Project 1). TODO(Ayan): correct this paragraph so it states exactly what you decided yourself.
+**Planning (before Oct 15):** the plan (`docs/plan.md`) was drafted with Claude in planning sessions at Ayan's request: Ayan set the constraints (solo, Python + React + FalkorDB + FastAPI + Gemini, demoable in 4 days, FDE portfolio framing) and asked Claude to propose the project; Claude proposed the domain, the "Lore" concept, the discovery brief numbers, the permission model and the eval design.
 
-**During the hackathon:** the story bible (`docs/story-bible.md`) was drafted by Claude from the plan on Oct 16 and is under Ayan's review. TODO(Ayan): list here the design decisions you changed or own (the permission rules, the who-decides-what split, the eval design, the prompts).
+**During the hackathon:** the story bible (`docs/story-bible.md`) was drafted by Claude from the plan on Oct 16 and is under Ayan's review.
 
-**Generated by AI (Claude Code) and reviewed by Ayan:** TODO(Ayan): replace this line with the exact list once you have reviewed the code, for example which modules, tests and config files were AI-generated and how you checked them.
+My story, including how I worked with Claude, is at the top of this README: [Why I built it](#why-i-built-it).
 
-Ayan must be able to explain every part of the system (hackathon rule 12). TODO(Ayan): note here anything you could not yet explain and how you resolved it.
+### Where my testing changed the product
+
+These came from me using the app and reporting what was wrong; each fix is logged with how it was verified in [docs/FIX_LOG.md](docs/FIX_LOG.md):
+
+- **F-16:** the Slack message was a wall of raw ids, so it was rebuilt with names, sections and links.
+- **F-17:** a recorded run showed a failed tool step on every replay.
+- **F-18:** the graph jittered and the camera jumped between steps during a run.
+- **F-19:** with Graph OFF the app still showed the graph, so Graph OFF got its own vector-only view and the Graph ON vs OFF comparison.
+- The reasoning model was picked by comparing two models on cost, speed and accuracy (FIX_LOG, "Reasoning-model comparison"), and the deployment (Fargate, S3 and CloudFront, budget and daily cap) was my call (docs/DECISIONS.md D-14 to D-18).

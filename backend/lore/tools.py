@@ -482,9 +482,7 @@ def evidence_path(ctx: ToolContext, args: EvidencePathArgs) -> ToolResult:
     params = {"alert": alert_id(args.alert_id), "pr": pr_id(args.pr_number)}
     try:
         out = run_query(ctx, "evidence_path", params)
-    except (
-        Exception
-    ):  # e.g. algo.SPpaths needs weightProp on every type (plan L.11): use plain Cypher
+    except Exception:  # the algorithm call failed: retry with plain Cypher shortestPath
         out = run_query(ctx, "evidence_path_fallback", params)
     rows = out.dicts()
     if not rows:
@@ -672,107 +670,3 @@ def propose_action(ctx: ToolContext, args: ProposeActionArgs) -> ToolResult:
     # and made the UI zoom onto an empty spot (FIX_LOG F-12).
     cited = [c for c in args.cited_ids if c in ctx.seen_ids]
     return ToolResult(tool="propose_action", reason=args.reason, data=data, node_ids=cited)
-
-
-# ------------------------------------------------------------------ 12. run_cypher (safety net)
-
-RUN_CYPHER_DEFAULT_LIMIT = 50
-RUN_CYPHER_MAX_LIMIT = 200
-
-_STRINGS = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
-_COMMENTS = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
-_WRITE_WORDS = re.compile(r"\b(create|merge|set|delete|remove|drop|detach|foreach|load)\b", re.I)
-_SAFE_CALLS = (
-    r"db\.idx\.(fulltext|vector)\.queryNodes|algo\.(pageRank|SPpaths|SSpaths)"
-    r"|db\.(labels|relationshipTypes|propertyKeys)"
-)
-_UNSAFE_CALL = re.compile(rf"\bcall\b(?!\s+(?:{_SAFE_CALLS})\b)", re.I)
-# Free text on content nodes can't be matched to an id, so we refuse to read it this way.
-_TEXT_ACCESS = re.compile(r"\.\s*(text|summary|body|content|embedding)\b|\bChunk\b", re.I)
-_ID_LIKE = re.compile(r"^[a-z]+:\S+$")
-
-
-class RunCypherArgs(ToolArgs):
-    cypher: str = Field(
-        description="A read-only openCypher query. Return node ids (n.id) in EVERY row; rows "
-        "without an id, or with an id you may not see, are dropped. Do not read .text."
-    )
-
-
-def check_read_only(cypher: str) -> str | None:
-    """Return a reason if the query looks unsafe, else None (ro() also refuses writes)."""
-    bare = _COMMENTS.sub(" ", _STRINGS.sub("''", cypher))
-    if ";" in bare.strip().rstrip(";"):
-        return "only one statement is allowed"
-    if _WRITE_WORDS.search(bare):
-        return "write keywords (CREATE/MERGE/SET/DELETE/REMOVE/DROP ...) are not allowed"
-    if _UNSAFE_CALL.search(bare):
-        return "only search and algorithm procedures may be called"
-    if _TEXT_ACCESS.search(bare):
-        return "reading chunk text is not allowed here; use search_discussions"
-    return None
-
-
-def force_limit(cypher: str) -> str:
-    """Make sure the query ends with a LIMIT of at most RUN_CYPHER_MAX_LIMIT."""
-    q = cypher.strip().rstrip(";").strip()
-    m = re.search(r"\blimit\s+(\d+)\s*$", q, re.I)
-    if not m:
-        return f"{q} LIMIT {RUN_CYPHER_DEFAULT_LIMIT}"
-    capped = min(int(m[1]), RUN_CYPHER_MAX_LIMIT)
-    return f"{q[: m.start(1)]}{capped}"
-
-
-def _ids_in(cell) -> list[str]:
-    """Ids found in one result cell: id-looking strings, or the `id` of a returned node."""
-    if isinstance(cell, str):
-        return [cell] if _ID_LIKE.match(cell) else []
-    if isinstance(cell, list | tuple):
-        return [i for c in cell for i in _ids_in(c)]
-    if isinstance(cell, dict):
-        return [i for c in cell.values() for i in _ids_in(c)]
-    props = getattr(cell, "properties", None)
-    return _ids_in(props.get("id")) if isinstance(props, dict) else []
-
-
-def _plain(cell):
-    """Make a cell JSON-friendly (graph objects become dicts, embeddings are dropped)."""
-    if isinstance(cell, list | tuple):
-        return [_plain(c) for c in cell]
-    if isinstance(cell, dict):
-        return {k: _plain(v) for k, v in cell.items() if k != "embedding"}
-    props = getattr(cell, "properties", None)
-    if isinstance(props, dict):
-        return {k: v for k, v in props.items() if k != "embedding"}
-    return cell if isinstance(cell, str | int | float | bool | type(None)) else str(cell)
-
-
-@tool(
-    "run_cypher",
-    "Last resort when no other tool fits: run your own READ-ONLY Cypher query. It gets a LIMIT "
-    "forced, and every row must contain node ids; rows with ids you are not allowed to see are "
-    "dropped. Prefer the other tools.",
-    RunCypherArgs,
-)
-def run_cypher(ctx: ToolContext, args: RunCypherArgs) -> ToolResult:
-    problem = check_read_only(args.cypher)
-    if problem:
-        return ToolResult(tool="run_cypher", reason=args.reason, error=f"rejected: {problem}")
-    cypher = force_limit(args.cypher)
-    perms = permission_params(ctx.viewer)
-    out = ctx.graph.ro(cypher, perms)  # GRAPH.RO_QUERY: cannot write even if our checks missed
-
-    row_ids = [_ids_in(row) for row in out.rows]
-    wanted = sorted({i for ids in row_ids for i in ids})
-    visible = set()
-    if wanted:  # one more query: which of these ids may this viewer see?
-        check = ctx.graph.ro(load_query("visible_ids"), {"ids": wanted, **perms})
-        visible = {r[0] for r in check.rows}
-    kept, kept_ids = [], []
-    for row, ids in zip(out.rows, row_ids, strict=True):
-        if ids and all(i in visible for i in ids):  # no id at all = cannot verify = dropped
-            kept.append(dict(zip(out.header, (_plain(c) for c in row), strict=False)))
-            kept_ids += ids
-    return _result(
-        "run_cypher", args, out, kept, kept_ids, restricted_matches=len(out.rows) - len(kept)
-    )

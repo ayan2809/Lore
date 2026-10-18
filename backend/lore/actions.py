@@ -144,8 +144,12 @@ async def approve(
     except Exception as exc:  # the action stays visible with the error, so a human can retry
         action.status = "failed"
         action.blocked_reason = f"{type(exc).__name__}: {exc}"
-    log_event(event="action_" + action.status, action_id=action.id, kind=action.kind,
-              simulated=action.simulated)
+    log_event(
+        event="action_" + action.status,
+        action_id=action.id,
+        kind=action.kind,
+        simulated=action.simulated,
+    )
     await _save_async(action, graph)
     return action
 

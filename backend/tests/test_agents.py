@@ -421,6 +421,8 @@ def test_graph_off_investigator_gets_text_search_and_an_honest_note():
     # every graph-mode Investigator tool is graph-only, so Graph OFF must offer something else
     assert tools.tools_for(spec.tool_names, "vector") == []
     assert [t.name for t in tools.tools_for(off.tool_names, "vector")] == [
-        "search_discussions", "similar_incidents"]
+        "search_discussions",
+        "similar_incidents",
+    ]
     assert off.system_prompt.endswith(VECTOR_MODE_NOTE)
     assert for_mode(spec, "graph") is spec

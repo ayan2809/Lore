@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from lore.tools import ToolContext, run_query
 
 FETCH_K = 100  # how many chunks the vector index returns BEFORE the permission filter
-RESTRICTED_MAX_DISTANCE = 0.5  # a chunk this close in meaning counts as a "match" (tune Day 1)
+RESTRICTED_MAX_DISTANCE = 0.5  # a chunk this close in meaning counts as a "match"
 
 _STOPWORDS = {
     "the",
@@ -172,7 +172,8 @@ def restricted_match_count(
 
 # ------------------------------------------------------------------ graph facts (FIX_LOG F-06)
 
-# Nodes with no access_level that every viewer may see (same list as visible_ids.cypher).
+# Nodes with no access_level that every viewer may see (org and structure labels only;
+# memory nodes such as Finding and Step never count as open: FIX_LOG C-12).
 OPEN_LABELS = ["Person", "Team", "Role", "Channel", "Service", "Repo", "CodeModule", "Alert"]
 MAX_LINKS_PER_TYPE = 6  # a service has ~140 deploys; keep the text short
 

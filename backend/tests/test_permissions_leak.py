@@ -68,7 +68,7 @@ def ctx_for(graph, persona: str, **kwargs) -> ToolContext:
 
 def assert_clean(persona: str, payload) -> None:
     if isinstance(payload, dict):
-        # `cypher` echoes the query text the caller wrote (run_cypher), not data from the graph.
+        # `cypher` is the query text from our own .cypher files, not data from the graph.
         payload = {k: v for k, v in payload.items() if k != "cypher"}
     text = json.dumps(payload, default=str)
     for secret in FORBIDDEN[persona]:
@@ -110,11 +110,6 @@ def test_every_tool_is_clean(graph, stored, persona):
             ("recent_changes", {"service": "checkout", "hours": 48}),
             ("evidence_path", {"alert_id": "A-3001", "pr_number": "482"}),
             ("blast_radius", {"service": "pricing"}),
-            ("run_cypher", {"cypher": f"MATCH (n) WHERE n.id = '{source_id}' RETURN n.id AS id"}),
-            (
-                "run_cypher",
-                {"cypher": "MATCH (n) WHERE n.access_level IS NOT NULL RETURN n.id AS id"},
-            ),
         ]
         for name, args in calls:
             result = call_tool(ctx, name, {"reason": "leak test", **args})

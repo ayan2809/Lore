@@ -52,6 +52,7 @@ def display(node_id: str, names: dict[str, dict[str, Any]], with_title: bool = F
 
 def humanize(text: str, names: dict[str, dict[str, Any]]) -> str:
     """Replace known graph ids inside free text with their display names."""
+
     def swap(m: re.Match) -> str:
         return display(m.group(0), names) if m.group(0) in names else m.group(0)
 
@@ -97,11 +98,14 @@ def build_message(
 
     fields = [f"*Root cause*\n{root}"]
     if ruled_out:
-        fields.append("*Ruled out*\n" + "\n".join(
-            _esc(display(i, names, with_title=True)) for i in ruled_out))
+        fields.append(
+            "*Ruled out*\n" + "\n".join(_esc(display(i, names, with_title=True)) for i in ruled_out)
+        )
     if related:
-        fields.append("*Related decisions and incidents*\n" + "\n".join(
-            _esc(display(i, names, with_title=True)) for i in related))
+        fields.append(
+            "*Related decisions and incidents*\n"
+            + "\n".join(_esc(display(i, names, with_title=True)) for i in related)
+        )
     page = f"*{_esc(display(report.people.page, names))}*" if report.people.page else "nobody"
     fields.append(
         f"*People*\nPage {page}\nConsult {_esc(people(report.people.consult))}\n"
@@ -116,9 +120,19 @@ def build_message(
     header = f"{severity} · {symptom}"[:150]  # Slack header limit
     blocks: list[dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": (
-            f"{SEVERITY_EMOJI.get(severity, '')} Alert *{_esc(alert_name)}* · "
-            f"confidence {round(report.confidence * 100)}% · from Lore, approved by a human")}]},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"{SEVERITY_EMOJI.get(severity, '')} Alert *{_esc(alert_name)}* · "
+                        f"confidence {round(report.confidence * 100)}% · "
+                        "from Lore, approved by a human"
+                    ),
+                }
+            ],
+        },
         {"type": "section", "text": {"type": "mrkdwn", "text": _esc(humanize(summary, names))}},
         {"type": "section", "fields": [{"type": "mrkdwn", "text": f} for f in fields]},
     ]

@@ -63,15 +63,22 @@ def load_data_if_empty(graph: GraphLike, settings: Settings) -> None:
             fake_embeddings=fake,
             embed_dim=settings.embed_dim,
             log=lambda message: log_event(
-                event="load_on_start_progress", message=message,
+                event="load_on_start_progress",
+                message=message,
                 seconds=round(time.monotonic() - started, 1),
             ),
         )
-        log_event(event="load_on_start_done", chunks=stats.get("chunks"),
-                  seconds=round(time.monotonic() - started, 1))
+        log_event(
+            event="load_on_start_done",
+            chunks=stats.get("chunks"),
+            seconds=round(time.monotonic() - started, 1),
+        )
     except Exception as exc:  # the API keeps serving (health, replays) even if the load fails
-        log_event(event="load_on_start_failed", error=str(exc),
-                  seconds=round(time.monotonic() - started, 1))
+        log_event(
+            event="load_on_start_failed",
+            error=str(exc),
+            seconds=round(time.monotonic() - started, 1),
+        )
 
 
 def start_load_on_start(graph: GraphLike, settings: Settings) -> threading.Thread:
@@ -102,9 +109,13 @@ async def startup_checks(settings: Settings) -> None:
                 log_event(event="falkordb_check_failed", error=str(exc))
     if settings.load_on_start == "if_empty" and falkordb_ok:
         start_load_on_start(graph, settings)  # background: never delays startup or /api/health
-    log_event(event="startup", falkordb=falkordb_ok, gemini=bool(settings.gemini_api_key),
-              replay_mode=settings.force_replay or not settings.gemini_api_key,
-              session_secret_is_default=settings.session_secret == "dev-only-change-me")
+    log_event(
+        event="startup",
+        falkordb=falkordb_ok,
+        gemini=bool(settings.gemini_api_key),
+        replay_mode=settings.force_replay or not settings.gemini_api_key,
+        session_secret_is_default=settings.session_secret == "dev-only-change-me",
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
