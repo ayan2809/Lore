@@ -98,6 +98,21 @@ Three rules carry the design:
 2. **Permissions are enforced inside the Cypher query.** Content the viewer may not see never leaves FalkorDB. The viewer comes from the login session, never from the model.
 3. **Facts are computed in code; the model narrates.** Gemini picks tools and writes text; every claim must cite an id that a tool returned in this run.
 
+### How the agents work
+
+A plain-Python supervisor runs four specialist agents in a fixed order. Each agent is the same tool-calling loop with its own prompt, tools and model; code decides the facts between steps, the agents share a blackboard in the graph, and a human approves anything that goes out. More in [docs/DESIGN_QA.md](docs/DESIGN_QA.md).
+
+![How Lore's agents are built: the supervisor runs Triage, Historian, Investigator and Responder in order, with code rules between them, read-only Cypher tools over FalkorDB below, and human approval before Slack and GitHub](docs/img/agent-architecture.png)
+
+<details>
+<summary>Inside one agent, and which design pattern it follows</summary>
+
+![The loop inside one agent: Gemini calls a tool or stops; code runs the tool with the permission filter; findings are checked for citations with one retry, then written to the blackboard](docs/img/agent-loop.png)
+
+![Design patterns used: a sequential workflow with gates, a deterministic supervisor, a ReAct tool loop per agent, a blackboard, a fixed tool catalogue, an evaluator with one retry, facts in code, human in the loop, and three kinds of memory](docs/img/agent-patterns.png)
+
+</details>
+
 ### Who decides what
 
 | The model (Gemini) does | The code does | A human does |
