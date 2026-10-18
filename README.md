@@ -4,7 +4,7 @@ Lore loads a fictional food-delivery company ("Kettle") into one **FalkorDB** gr
 
 Built solo by Ayan for **Graph Hacks** (WeMakeDevs x FalkorDB), Oct 15-18 2026.
 
-**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** https://youtu.be/-pN2LUVsix4
+**Live demo:** https://d1cu7fzoa0v5wz.cloudfront.net · **Tracks:** all three · **Video:** https://youtu.be/-pN2LUVsix4 · **Blog:** https://banana-coder.hashnode.dev/waking-up-to-the-context-not-just-the-alert
 
 ![The Lore investigation screen: the reasoning trail on the left, the permission-filtered company graph with the evidence path lit in the middle, and the cited root-cause report with who to page on the right](docs/img/investigation.png)
 
@@ -271,7 +271,7 @@ All three tracks.
 
 - Live demo: **https://d1cu7fzoa0v5wz.cloudfront.net** (AWS: CloudFront + S3 for the page, ECS Fargate for the API with FalkorDB beside it on EFS; see [infra/README.md](infra/README.md)). Live runs call Gemini; after 100 live runs in a day the API plays back a recorded run instead, and the UI marks it "REPLAY". Tick "Replay a recorded run" to watch one without using a live run.
 - Demo video (4:51, with subtitles): **https://youtu.be/-pN2LUVsix4**. The narration was generated with Gemini TTS from my script; the investigations shown are recorded runs, and the Ask the brain answers are live.
-- Blog post: **TODO** (optional side prize)
+- Blog post: **https://banana-coder.hashnode.dev/waking-up-to-the-context-not-just-the-alert** ("Waking up to the context, not just the alert": how Lore is built on FalkorDB and what changed when I switched the graph off)
 
 ## Project docs
 
