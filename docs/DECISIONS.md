@@ -29,7 +29,8 @@ Rollbacks, paging real people, changing permissions, closing incidents, deciding
 
 | Date | Mode | Retrieval recall@5 | Cited ratio | Leaks | Notes |
 |---|---|---|---|---|---|
-| (pending) | | | | | First run after the graph is loaded (PENDING_TASKS P0) |
+| Oct 18 | Graph ON | 75% | 67% | 0 | Real gemini-embedding-2; Ask with graph facts; models 3.5-flash-lite / 3.8-flash; key facts 71%, refusals correct 93% |
+| Oct 18 | Graph OFF (vector only) | 38% | 49% | 0 | Same questions; key facts 43%, refusals correct 66% |
 
 ## Rerank weights
 

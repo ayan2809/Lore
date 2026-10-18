@@ -15,7 +15,7 @@ Everything that was "never run live" on Oct 16 has now run live, locally (Falkor
 | API + SSE + cookie session | ✅ live over HTTP |
 | Real Slack post + GitHub issue | ✅ sent (issue #1 in `ayan2809/kettle-incidents`) |
 | Frontend on the real API | ✅ headless Chrome; evidence path lights up; report renders; 0 console errors |
-| Eval | Retrieval: Graph ON 75% vs OFF 38% recall@5. Generation: key facts 74% vs 44%, refusals 95% vs 68%. **0 leaks** |
+| Eval | Retrieval: Graph ON 75% vs OFF 38% recall@5. Generation: key facts 71% vs 43%, refusals correct 93% vs 66%. **0 leaks** |
 | Replays | ✅ 5 real recordings committed (`backend/replays/story_*.jsonl`); playback verified |
 | AWS infra (`infra/`) | ✅ built + validated offline (cfn-lint, validate-template ×4, shellcheck); **not deployed** (HUMAN_REVIEW "Before deploying") |
 | Tests | 304 unit + 23 integration = **327 pass** on the live graph |

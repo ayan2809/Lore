@@ -46,7 +46,7 @@
 | Policy block (F-09) | An issue citing the private thread → blocked with the reason |
 | Real UI (headless Chrome, 1920×1080) | Graph renders; agents light the evidence path; report, people, restricted warning and actions render; 0 console errors |
 | Eval, retrieval (59 questions) | Graph ON **75%** recall@5 vs Graph OFF **38%** (lookup 93% vs 11%, stale 76% vs 29%); **0 forbidden ids** |
-| Eval, generation (59 questions, Ask end to end) | Graph ON vs OFF: key facts **74% vs 44%**, claims cited **69% vs 51%**, refusals correct **95% vs 68%**, **0 leaks**. *Run before F-06's ownership-prompt tweak; re-run for final numbers* |
+| Eval, generation (59 questions, Ask end to end) | Final run (after all fixes): Graph ON vs OFF: key facts **71% vs 43%**, claims cited **67% vs 49%**, refusals correct **93% vs 66%**, **0 leaks**. (An earlier run gave 74/69/95 vs 44/51/68: normal run-to-run model variance) |
 | Permission leak check (4 personas × 63 probes) | **0** |
 
 ## Reasoning-model comparison: `gemini-4-argon` vs `gemini-3.8-flash` (Investigator)
