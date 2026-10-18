@@ -1,12 +1,12 @@
 # Human review: things that need Ayan
 
-> **Last updated:** Oct 18 2026 (deadline 23:59 IST tonight), after the first live local test round (see [FIX_LOG.md](FIX_LOG.md)) and the infra build.
+> **Last updated:** Oct 18 2026, after the AWS deploy. **Live: https://d1cu7fzoa0v5wz.cloudfront.net** (deadline 23:59 IST tonight).
 >
 > **How to answer:** write on the `> **Answer:**` line under the item (e.g. `> **Answer:** OK with C1–C8, but use ayan2809/kettle-incidents`), then tick the box `[x]` when nothing more is needed. A short answer is fine: "OK", "change X to Y", "skip". Agents read this file before working and act on your answers. They never tick a box or invent an answer for you.
 >
 > Agents: add new items at the bottom of the right section with the next free number (next free: **R-37**).
 
-## Before deploying to AWS: what is still open
+## Deployed on Oct 18. What was open before the deploy (all resolved)
 
 The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304 unit tests), and local live testing passed ([FIX_LOG.md](FIX_LOG.md)). **The agent stopped before deploying because these need you:**
 
@@ -215,12 +215,8 @@ The infra is built and validated (cfn-lint, `validate-template`, shellcheck, 304
     - the uv image `0.11.3` and the `python:3.12-slim` mirror exist for arm64; every Python dependency has an aarch64 wheel;
     - the FalkorDB image runs as root, has `redis-cli`, and its `run.sh` builds the command from `$REDIS_ARGS` (so the password goes there, not as command arguments; the plan's C3 was wrong and the infra agent corrected it);
     - `TIMEOUT_DEFAULT` / `TIMEOUT_MAX` exist in FalkorDB 4.18.
-  - **Still unverified until the first deploy:**
-    - Redis actually persists to EFS (restart test);
-    - our image builds on arm64 (wheels, uv image tag);
-    - SSE works through CloudFront for a whole investigation;
-    - the cookie works on the CloudFront URL from a phone;
-    - first CloudFront use on this account (some new accounts need verification).
+  - **Verified on the live deploy (Oct 18):** persistence to EFS (restart test: AOF reloaded in 0.8 s, load skipped); the ARM64 image build in CodeBuild; SSE through CloudFront for a whole investigation (53 events); cookie flags `HttpOnly; Secure; SameSite=Lax`; CloudFront worked on this account; the ALB refuses direct traffic.
+  - **Still for you:** open the URL on your phone (persona switch, a full run, approve → Slack).
 
   Nothing to answer unless you want to change the plan. Tick it after the first deploy checks pass.
   > **Answer:**

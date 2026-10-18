@@ -17,7 +17,7 @@ Everything that was "never run live" on Oct 16 has now run live, locally (Falkor
 | Frontend on the real API | ✅ headless Chrome; evidence path lights up; report renders; 0 console errors |
 | Eval | Retrieval: Graph ON 75% vs OFF 38% recall@5. Generation: key facts 71% vs 43%, refusals correct 93% vs 66%. **0 leaks** |
 | Replays | ✅ 5 real recordings committed (`backend/replays/story_*.jsonl`); playback verified |
-| AWS infra (`infra/`) | ✅ built + validated offline (cfn-lint, validate-template ×4, shellcheck); **not deployed** (HUMAN_REVIEW "Before deploying") |
+| AWS infra (`infra/`) | ✅ **Deployed Oct 18 (14:25 IST): https://d1cu7fzoa0v5wz.cloudfront.net** (image `47cd1c81bb71`, ARM64). Verified live: health; first boot loaded the graph with real embeddings in 19 s; a full investigation streams through CloudFront (53 SSE events / 53 s); UI in headless Chrome; replay; cookie `HttpOnly; Secure; SameSite=Lax`; the ALB is unreachable directly; the graph survives a task restart (AOF on EFS, reload 0.8 s) |
 | Tests | 304 unit + 23 integration = **327 pass** on the live graph |
 
 New challenges (details in FIX_LOG):
