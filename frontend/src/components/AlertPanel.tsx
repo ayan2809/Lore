@@ -11,9 +11,10 @@ interface Props {
   replay: boolean
   onReplay: (value: boolean) => void
   onRun: () => void
+  onCompare: () => void
 }
 
-export default function AlertPanel({ alerts, selectedId, onSelect, status, personaName, replay, onReplay, onRun }: Props) {
+export default function AlertPanel({ alerts, selectedId, onSelect, status, personaName, replay, onReplay, onRun, onCompare }: Props) {
   const busy = status === 'starting' || status === 'running'
   const ran = status === 'done' || status === 'failed'
   const first = personaName.split(' ')[0]
@@ -49,6 +50,15 @@ export default function AlertPanel({ alerts, selectedId, onSelect, status, perso
         className="mt-4 w-full rounded-xl bg-red-600 px-4 py-3.5 text-lg font-bold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {busy ? 'Agents working...' : ran ? `▶ Run again as ${first}` : '▶ Run the 3 AM incident'}
+      </button>
+
+      <button
+        onClick={onCompare}
+        disabled={busy || !selectedId}
+        className="mt-2 min-h-11 w-full rounded-lg border border-slate-700 bg-slate-900 px-4 font-semibold text-slate-100 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+        title="Run the same alert with the graph and with vector search only, side by side"
+      >
+        Compare Graph ON vs OFF
       </button>
 
       <label className="mt-3 flex items-center gap-2 text-xs text-slate-400" title="Play back a recorded run instead of calling Gemini">

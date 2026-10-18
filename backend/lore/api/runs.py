@@ -142,7 +142,8 @@ class RunRegistry:
         try:
             if path is None:
                 await run.push("error", {
-                    "message": f"No recorded run for alert {run.alert_id} and this persona.",
+                    "message": f"No recorded {'Graph OFF ' if run.mode == 'vector' else ''}"
+                    f"run for alert {run.alert_id} and this persona.",
                     "recoverable": False,
                 })
             else:

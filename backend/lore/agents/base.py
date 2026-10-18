@@ -20,7 +20,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -59,6 +59,27 @@ class AgentSpec:
     model: str
     system_prompt: str
     tool_names: list[str]
+    # Graph OFF: tools to offer instead (None = the graph-mode list, minus graph-only tools).
+    vector_tool_names: list[str] | None = None
+
+
+# Appended to the system prompt in Graph OFF mode (the vector-only baseline, FIX_LOG F-19).
+VECTOR_MODE_NOTE = """
+Graph OFF (vector-only baseline): you can only search sources by meaning. Nothing that follows
+links between services, deploys, PRs and people is available, so do not ask for it. Work from
+the text you find, and say plainly what you could not check.
+"""
+
+
+def for_mode(spec: AgentSpec, mode: str) -> AgentSpec:
+    """The spec as used in this mode: Graph OFF swaps in the vector tools and adds a note."""
+    if mode != "vector":
+        return spec
+    return replace(
+        spec,
+        tool_names=spec.vector_tool_names or spec.tool_names,
+        system_prompt=spec.system_prompt + VECTOR_MODE_NOTE,
+    )
 
 
 class FindingsDraft(BaseModel):
@@ -145,6 +166,7 @@ async def run_agent(
     max_steps: int | None = None,  # tighter budget, e.g. when following a playbook
 ) -> AgentOutput:
     bb = blackboard
+    spec = for_mode(spec, ctx.mode)
     await emit(bb.event("agent_started", spec.name, {"agent": spec.name, "goal": goal}))
 
     decls = tool_declarations(tools.tools_for(spec.tool_names, ctx.mode)) or None

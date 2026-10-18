@@ -4,6 +4,7 @@ import type { AlertItem, GraphMode, GraphView, Health, Persona } from './api/typ
 import ActionsPanel from './components/ActionsPanel'
 import AlertPanel from './components/AlertPanel'
 import AskPanel from './components/AskPanel'
+import CompareView from './components/CompareView'
 import GraphCanvas from './components/GraphCanvas'
 import ReportCard from './components/ReportCard'
 import RunSummary from './components/RunSummary'
@@ -11,6 +12,8 @@ import SourceDrawer from './components/SourceDrawer'
 import TopBar from './components/TopBar'
 import type { Tab } from './components/TopBar'
 import Trail from './components/Trail'
+import { Panel } from './components/ui'
+import VectorView from './components/VectorView'
 import { useInvestigation } from './hooks/useInvestigation'
 
 export default function App() {
@@ -27,8 +30,13 @@ export default function App() {
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [startupError, setStartupError] = useState<string | null>(null)
 
-  const inv = useInvestigation()
+  // One run per mode: flipping Graph ON/OFF shows that mode's own run (or none), so a Graph ON
+  // result is never shown under Graph OFF. "Compare" starts both at once (FIX_LOG F-19).
+  const invOn = useInvestigation()
+  const invOff = useInvestigation()
+  const inv = mode === 'graph' ? invOn : invOff
   const { state } = inv
+  const [compare, setCompare] = useState(false)
 
   // ---- startup: personas, the current session (default Arjun), alerts
   useEffect(() => {
@@ -81,16 +89,28 @@ export default function App() {
       try {
         const { persona: p } = await api.setSession(id)
         setPersona(p)
-        inv.clear() // a report belongs to one viewer, so start fresh
+        // a report belongs to one viewer, so start fresh
+        invOn.clear()
+        invOff.clear()
+        setCompare(false)
       } catch (err) {
         setStartupError(err instanceof Error ? err.message : String(err))
       }
     },
-    [inv],
+    [invOn, invOff],
   )
 
   const run = () => alertId && inv.start(alertId, mode, replay)
-  const busy = state.status === 'starting' || state.status === 'running'
+  const startCompare = () => {
+    if (!alertId) return
+    setCompare(true)
+    invOn.start(alertId, 'graph', replay)
+    invOff.start(alertId, 'vector', replay)
+  }
+  const isBusy = (s: typeof state) => s.status === 'starting' || s.status === 'running'
+  const busy = isBusy(state)
+  const compareBusy = isBusy(invOn.state) || isBusy(invOff.state)
+  const alert = alerts.find((a) => a.id === alertId)
 
   return (
     <div className="flex h-screen flex-col">
@@ -117,7 +137,26 @@ export default function App() {
         </div>
       )}
 
-      {tab === 'investigate' ? (
+      {tab === 'investigate' && compare ? (
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <CompareView
+            alertLabel={alert ? `${alert.name} · ${alert.symptom}` : (alertId ?? '')}
+            personaName={persona?.name ?? ''}
+            on={{ state: invOn.state, highlights: invOn.highlights, discovered: invOn.discovered }}
+            off={{ state: invOff.state, highlights: invOff.highlights, discovered: invOff.discovered }}
+            graph={loaded?.graph ?? null}
+            loading={graphLoading}
+            busy={compareBusy}
+            onRunAgain={startCompare}
+            onBack={() => setCompare(false)}
+            onOpenFull={(m) => {
+              setMode(m)
+              setCompare(false)
+            }}
+            onOpenSource={setSourceId}
+          />
+        </main>
+      ) : tab === 'investigate' ? (
         <main className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[19rem_minmax(0,1fr)_22rem] lg:overflow-hidden xl:grid-cols-[24rem_minmax(0,1fr)_29rem]">
           <div className="flex min-h-0 flex-col gap-3">
             <AlertPanel
@@ -129,6 +168,7 @@ export default function App() {
               replay={replay}
               onReplay={setReplay}
               onRun={run}
+              onCompare={startCompare}
             />
             <Trail
               trail={state.trail}
@@ -141,18 +181,38 @@ export default function App() {
           </div>
 
           <div className="h-[28rem] lg:h-auto">
-            <GraphCanvas
-              graph={loaded?.graph ?? null}
-              loading={graphLoading}
-              discovered={inv.discovered}
-              highlights={inv.highlights}
-              graphOn={mode === 'graph'}
-              onOpenSource={setSourceId}
-            />
+            {mode === 'graph' ? (
+              <GraphCanvas
+                graph={loaded?.graph ?? null}
+                loading={graphLoading}
+                discovered={inv.discovered}
+                highlights={inv.highlights}
+                graphOn
+                onOpenSource={setSourceId}
+              />
+            ) : (
+              <VectorView
+                graph={loaded?.graph ?? null}
+                loading={graphLoading}
+                trail={state.trail}
+                selectedSeq={state.selectedSeq}
+                onOpenSource={setSourceId}
+              />
+            )}
           </div>
 
           <div className="space-y-3 lg:overflow-y-auto">
             <ReportCard report={state.report} investigationId={state.investigationId} running={busy} onOpenSource={setSourceId} />
+            {mode === 'vector' && (
+              <Panel title="Not available with Graph OFF">
+                <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
+                  <li>Severity: it comes from the blast radius</li>
+                  <li>The evidence path from the alert to the PR</li>
+                  <li>Who to page: owners come from the graph</li>
+                  <li>Recent changes in time order, per service</li>
+                </ul>
+              </Panel>
+            )}
             <ActionsPanel actions={state.actions} onChange={inv.updateAction} onOpenSource={setSourceId} />
             <RunSummary summary={state.summary} mode={state.mode} />
           </div>

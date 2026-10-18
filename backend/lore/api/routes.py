@@ -224,7 +224,9 @@ async def start_investigation(
     log_event(event="investigation_start", investigation_id=run.id, viewer=viewer.id,
               alert_id=body.alert_id, mode=body.mode, replay=use_replay, reason=replay_reason)
     if use_replay:
-        registry.start_replay(run, replay.find_replay(body.alert_id, persona, settings))
+        registry.start_replay(
+            run, replay.find_replay(body.alert_id, persona, settings, mode=body.mode)
+        )
     else:
         registry.start_live(run, viewer, llm, graph, settings)
     return {"investigation_id": run.id, "replay": use_replay, "replay_reason": replay_reason}

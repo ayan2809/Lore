@@ -410,3 +410,17 @@ async def test_supervisor_survives_an_agent_failure(fake_tools):
     assert errors and errors[0].agent == "historian" and errors[0].payload["recoverable"]
     assert [e.payload["agent"] for e in rec.of("agent_finished")][-1] == "responder"
     assert rec.types()[-1] == "done" and report.root_cause == "pr:482"
+
+
+def test_graph_off_investigator_gets_text_search_and_an_honest_note():
+    from lore.agents import investigator
+    from lore.agents.base import VECTOR_MODE_NOTE, for_mode
+
+    spec = investigator.spec(Settings())
+    off = for_mode(spec, "vector")
+    # every graph-mode Investigator tool is graph-only, so Graph OFF must offer something else
+    assert tools.tools_for(spec.tool_names, "vector") == []
+    assert [t.name for t in tools.tools_for(off.tool_names, "vector")] == [
+        "search_discussions", "similar_incidents"]
+    assert off.system_prompt.endswith(VECTOR_MODE_NOTE)
+    assert for_mode(spec, "graph") is spec

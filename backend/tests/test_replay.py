@@ -90,6 +90,16 @@ def test_find_replay_by_alert_and_persona(tmp_path):
     assert replay.find_replay("A-9999", "dana", s) is None
 
 
+def test_graph_off_replay_never_falls_back_to_a_graph_on_recording(tmp_path):
+    s = settings_for(tmp_path)
+    (tmp_path / "story_a_arjun.jsonl").write_text("")
+    assert replay.find_replay("A-3001", "arjun", s, mode="vector") is None
+    (tmp_path / "story_a_arjun_vector.jsonl").write_text("")
+    off = replay.find_replay("A-3001", "arjun", s, mode="vector")
+    assert off.name == "story_a_arjun_vector.jsonl"
+    assert replay.find_replay("A-3001", "arjun", s).name == "story_a_arjun.jsonl"
+
+
 def test_committed_sample_replay_is_valid_and_found_for_arjun(tmp_path):
     # Only the sample in the folder: real recordings (story_a_arjun.jsonl) would win otherwise.
     sample = replay.replay_dir() / "sample_story_a.replay.json"

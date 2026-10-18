@@ -35,7 +35,11 @@ that thread id. If no suspect survives testing, say so and keep confidence low.
 )
 
 TOOLS = ["recent_changes", "evidence_path", "trace_decision"]
+# Graph OFF: all three graph tools are unavailable, so without these the Investigator would have
+# no tools at all. Text search over PRs, threads, tickets, ADRs and incidents is the fair
+# vector-only baseline (FIX_LOG F-19).
+VECTOR_TOOLS = ["search_discussions", "similar_incidents"]
 
 
 def spec(settings: Settings) -> AgentSpec:
-    return AgentSpec("investigator", settings.model_pro, SYSTEM_PROMPT, TOOLS)
+    return AgentSpec("investigator", settings.model_pro, SYSTEM_PROMPT, TOOLS, VECTOR_TOOLS)

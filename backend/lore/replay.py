@@ -73,17 +73,25 @@ def list_replays(settings: Settings | None = None) -> list[str]:
     return sorted(names)
 
 
-def find_replay(alert_id: str, persona_id: str, settings: Settings | None = None) -> Path | None:
-    """Replay file for this alert and persona, e.g. story_a_arjun. None if nothing is recorded.
+def find_replay(
+    alert_id: str, persona_id: str, settings: Settings | None = None, mode: str = "graph"
+) -> Path | None:
+    """Replay file for this alert, persona and mode, e.g. story_a_arjun (Graph ON) or
+    story_a_arjun_vector (Graph OFF). None if nothing is recorded: a Graph OFF request never
+    falls back to a Graph ON recording (that showed a graph run under Graph OFF, F-19).
 
-    `sample_story_a` (hand-written) is the fallback for Arjun so the UI can be demoed offline.
+    `sample_story_a` (hand-written) is the Graph ON fallback for Arjun so the UI can be demoed
+    offline.
     """
     story = ALERT_STORY.get(alert_id.removeprefix("alert:"))
     if story is None:
         return None
-    names = [f"{story}_{persona_id}"]
-    if story == "story_a" and persona_id == "arjun":
-        names.append("sample_story_a")
+    if mode == "vector":
+        names = [f"{story}_{persona_id}_vector"]
+    else:
+        names = [f"{story}_{persona_id}"]
+        if story == "story_a" and persona_id == "arjun":
+            names.append("sample_story_a")
     directory = replay_dir(settings)
     for name in names:
         for suffix in SUFFIXES:
